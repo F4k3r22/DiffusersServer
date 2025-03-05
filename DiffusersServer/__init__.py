@@ -1,1 +1,2 @@
 from .Pipelines import TextToImagePipelineSD3
+from .create_server import create_inference_server as DiffusersServer
