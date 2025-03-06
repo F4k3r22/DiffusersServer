@@ -14,7 +14,8 @@ dependencies = [
     "diffusers",
     "torch",
     "torchvision",
-    "flash_attn==2.5.8"
+    "transformers==4.49.0",
+    "sentencepiece"
 ]
 
 [build-system]
