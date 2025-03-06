@@ -1,4 +1,4 @@
-from diffusers import StableDiffusion3Pipeline
+from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import StableDiffusion3Pipeline
 import torch
 import os
 import logging

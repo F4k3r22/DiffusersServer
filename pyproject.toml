@@ -1,6 +1,6 @@
 [project]
 name = "DiffusersServer"
-version = "0.1.1"
+version = "0.1.2"
 description = "Nueva solución tipo Ollama pero para modelos de Text2Img"
 authors = [
     { name = "Rivera.ai/Fredy Rivera", email = "riveraaai200678@gmail.com" }
@@ -12,7 +12,9 @@ dependencies = [
     "waitress",
     "psutil",
     "diffusers",
-    "torch"
+    "torch",
+    "torchvision",
+    "flash_attn==2.5.8"
 ]
 
 [build-system]
