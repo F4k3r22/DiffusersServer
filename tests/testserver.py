@@ -1,7 +1,8 @@
 from DiffusersServer import DiffusersServerApp
 
 app = DiffusersServerApp(
-    model='stabilityai/stable-diffusion-3.5-medium',
+    model='black-forest-labs/FLUX.1-schnell',
+    type_model='t2im',
     threads=3,
     enable_memory_monitor=True
 )

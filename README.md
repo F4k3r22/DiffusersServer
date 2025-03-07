@@ -38,7 +38,7 @@ Compatible con **Stable Diffusion 3**, **Stable Diffusion 3.5**, **Flux**, y **S
 
 ✅ **API REST fácil de usar**
 
-- Endpoint para inferencia: `POST /api/inference`
+- Endpoint para inferencia: `POST /api/diffusers/inference`
 - Parámetros personalizables: prompt, modelo, tamaño de imagen, cantidad de imágenes
 
 ✅ **Gestión optimizada de memoria**
@@ -51,6 +51,99 @@ Compatible con **Stable Diffusion 3**, **Stable Diffusion 3.5**, **Flux**, y **S
 ## 🚀 DiffusersServer está diseñado para ofrecer una solución ligera, rápida y flexible para la generación de imágenes a partir de texto.
 
 Si te gusta el proyecto, ¡considera darle una ⭐!
+
+## 🚀Instalar DiffusersServer
+```bash
+git clone https://github.com/F4k3r22/DiffusersServer.git
+cd DiffusersServer
+pip install .
+```
+
+## 🖥️Iniciar tu servidor
+```python
+from DiffusersServer import DiffusersServerApp
+
+app = DiffusersServerApp(
+    model='black-forest-labs/FLUX.1-schnell',
+    type_model='t2im',
+    threads=3,
+    enable_memory_monitor=True
+)
+```
+Asi de facil es levantar tu servidor de inferencia local con DiffusersServer en menos de 20 lineas de código
+
+## ⚡Peticiones a tu servidor
+
+### Generar una imagen
+```python
+import requests
+import json
+import os
+from datetime import datetime
+import re
+import urllib.parse
+import platform
+
+# URL del servidor
+server_url = "http://localhost:8500/api/diffusers/inference"
+base_url = "http://localhost:8500"  
+
+# Datos para enviar
+data = {
+    "prompt": "The T-800 Terminator Robot Returning From The Future, Anime Style",
+    "num_inference_steps" : 30,
+    "num_images" : 1
+}
+
+# Toma en cuenta que hay un funcionamiento raro con el num_images si es mayor que 1, se va llenando la memoria
+# En proporción de 4.833 GB por imagen (Con stabilityai/stable-diffusion-3.5-medium)
+# Igual se limpia la memoria automaticamente despues de la inferencia para no saturar la memoria excesivamente
+
+# Es decir SD3.5 memdium usa 19.137GB de VRAM cargado en memoria, y cuando se pide una imagen sube 23.970GB de VRAM
+# Y cuando se termina de generar esta imagen el uso de memoria vuelve al 19.137GB de la carga inicial
+
+# Realizar la solicitud POST
+print(f"Enviando prompt: \"{data['prompt']}\"")
+print("Generando imagen... (esto puede tomar un tiempo)")
+response = requests.post(server_url, json=data)
+
+# Verificar la respuesta
+if response.status_code == 200:
+    result = response.json()
+    image_url = result['response']
+    print("¡Solicitud exitosa!")
+    print(f"URL de la imagen generada: {image_url}")
+```
+
+## Stats del Servidor
+### Listar modelos disponibles
+```python
+import requests
+
+server_url = "http://localhost:8500/api/models"
+
+def list_models():
+    url = server_url
+    reseponse = requests.get(url=url)
+    reseponse.json()
+    print(reseponse.json())
+
+list_models_api = list_models()
+```
+### Obtener el uso de Memoria del Servidor
+```python
+import requests
+
+memory = 'http://localhost:8500/api/status'
+
+def get_memory_usage():
+    url = memory
+    response = requests.get(url=url)
+    response.json()
+    print(response.json())
+
+memory_list = get_memory_usage()
+```
 
 ---
 

@@ -15,6 +15,7 @@ import tempfile
 from dataclasses import dataclass
 import os
 import torch
+import gc
 
 from dataclasses import dataclass, field
 from typing import List
@@ -26,116 +27,55 @@ class PresetModels:
     Flux: List[str] = field(default_factory=lambda: ['black-forest-labs/FLUX.1-dev', 'black-forest-labs/FLUX.1-schnell'])
     WanT2V: List[str] = field(default_factory=lambda: ['Wan-AI/Wan2.1-T2V-14B-Diffusers', 'Wan-AI/Wan2.1-T2V-1.3B-Diffusers'])
 
-class RouteModels:
+class ModelPipelineInitializer:
     def __init__(self, model: str = '', type_models: str = 't2im'):
         self.model = model
         self.type_models = type_models
         self.pipeline = None
         self.device = "cuda" if torch.cuda.is_available() else "mps"
+        self.model_type = None
 
-    def create_pipeline(self):
+    def initialize_pipeline(self):
         if not self.model:
             raise ValueError("Model name not provided")
 
         # Check if model exists in PresetModels
         preset_models = PresetModels()
-        model_type = None
 
         # Determine which model type we're dealing with
         if self.model in preset_models.SD3:
-            model_type = "SD3"
+            self.model_type = "SD3"
         elif self.model in preset_models.SD3_5:
-            model_type = "SD3_5"
+            self.model_type = "SD3_5"
         elif self.model in preset_models.Flux:
-            model_type = "Flux"
+            self.model_type = "Flux"
         elif self.model in preset_models.WanT2V:
-            model_type = "WanT2V"
+            self.model_type = "WanT2V"
         else:
-            model_type = "SD"
+            self.model_type = "SD"
 
         # Create appropriate pipeline based on model type and type_models
         if self.type_models == 't2im':
-            if model_type in ["SD3", "SD3_5"]:
+            if self.model_type in ["SD3", "SD3_5"]:
                 self.pipeline = TextToImagePipelineSD3(self.model)
-            elif model_type == "Flux":
+            elif self.model_type == "Flux":
                 self.pipeline = TextToImagePipelineFlux(self.model)
-            elif model_type == "SD":
+            elif self.model_type == "SD":
                 self.pipeline = TextToImagePipelineSD(self.model)
             else:
-                raise ValueError(f"Model type {model_type} not supported for text-to-image")
+                raise ValueError(f"Model type {self.model_type} not supported for text-to-image")
         elif self.type_models == 't2v':
-            if model_type == "WanT2V":
+            if self.model_type == "WanT2V":
                 # Uncomment when VideoPipelines is implemented
                 # self.pipeline = WanT2VPipelines(self.model)
                 raise NotImplementedError("Text-to-video pipeline not yet implemented")
             else:
-                raise ValueError(f"Model type {model_type} not supported for text-to-video")
+                raise ValueError(f"Model type {self.model_type} not supported for text-to-video")
         else:
             raise ValueError(f"Unsupported type_models: {self.type_models}")
 
         return self.pipeline
 
-    def get_pipeline(self):
-        if self.pipeline is None:
-            self.create_pipeline()
-        return self.pipeline
-
-
-class ReturnPipelines:
-    def __init__(self, model: str = '', type_models: str = 't2im', scheduler = None):
-        self.model = model
-        self.type_models = type_models
-        self.pipeline = None
-        self.device = "cuda" if torch.cuda.is_available() else "mps"
-        self.scheduler = scheduler
-
-    def create_pipeline(self):
-        if not self.model:
-            raise ValueError("Model name not provided")
-
-        # Check if model exists in PresetModels
-        preset_models = PresetModels()
-        model_type = None
-
-        # Determine which model type we're dealing with
-        if self.model in preset_models.SD3:
-            model_type = "SD3"
-        elif self.model in preset_models.SD3_5:
-            model_type = "SD3_5"
-        elif self.model in preset_models.Flux:
-            model_type = "Flux"
-        elif self.model in preset_models.WanT2V:
-            model_type = "WanT2V"
-        else:
-            model_type = "SD"
-
-        # Create appropriate pipeline based on model type and type_models
-        if self.type_models == 't2im':
-            if model_type in ["SD3", "SD3_5"]:
-                self.pipeline = StableDiffusion3Pipeline.from_pretrained(self.model, scheduler=self.scheduler, torch_dtype=torch.float16)
-                self.pipeline = self.pipeline.to(self.device)
-            elif model_type == "Flux":
-                self.pipeline = FluxPipeline.from_pretrained(self.model, scheduler=self.scheduler, torch_dtype=torch.float16)
-                self.pipeline = self.pipeline.to(self.device)
-            else:
-                self.pipeline = StableDiffusionPipeline.from_pretrained(self.model, scheduler=self.scheduler, torch_dtype=torch.float16)
-                self.pipeline = self.pipeline.to(self.device)
-        elif self.type_models == 't2v':
-            if model_type == "WanT2V":
-                # Uncomment when VideoPipelines is implemented
-                # self.pipeline = WanT2VPipelines(self.model)
-                raise NotImplementedError("Text-to-video pipeline not yet implemented")
-            else:
-                raise ValueError(f"Model type {model_type} not supported for text-to-video")
-        else:
-            raise ValueError(f"Unsupported type_models: {self.type_models}")
-
-        return self.pipeline
-
-    def return_pipeline(self):
-        if self.pipeline is None:
-            self.create_pipeline()
-        return self.pipeline
 
 # Configuraciones del servidor
 service_url = 'http://localhost:8500'
@@ -162,17 +102,17 @@ def create_app(config=None):
     CORS(app)
     app.config['SERVER_CONFIG'] = config or ServerConfigModels()
     
-    # Inicialización del router de modelos
-    logger.info("Inicializando router de modelos...")
-    model_router = RouteModels(
+    # Inicialización del pipeline de modelo único
+    logger.info(f"Inicializando pipeline para el modelo: {app.config['SERVER_CONFIG'].model}")
+    model_initializer = ModelPipelineInitializer(
         model=app.config['SERVER_CONFIG'].model,
         type_models=app.config['SERVER_CONFIG'].type_models
     )
-    model_pipeline = model_router.get_pipeline()
+    model_pipeline = model_initializer.initialize_pipeline()
     model_pipeline.start()  # Iniciamos el pipeline
-    app.config["MODEL_ROUTER"] = model_router
     app.config["MODEL_PIPELINE"] = model_pipeline
-    logger.info(f"Pipeline inicializado para el modelo: {app.config['SERVER_CONFIG'].model}")
+    app.config["MODEL_INITIALIZER"] = model_initializer
+    logger.info("Pipeline inicializado y listo para recibir solicitudes")
 
     @app.route('/api/diffusers/inference', methods=['POST'])
     def api():
@@ -180,40 +120,17 @@ def create_app(config=None):
         if not data:
             return jsonify({'error': 'No data provided'}), 400
 
-        # Recuperamos el router y pipeline cargados previamente
-        model_router = app.config["MODEL_ROUTER"]
+        # Recuperamos el pipeline cargado
         model_pipeline = app.config["MODEL_PIPELINE"]
+        model_initializer = app.config["MODEL_INITIALIZER"]
         
-        if not model_pipeline:
+        if not model_pipeline or not model_pipeline.pipeline:
             return jsonify({'error': 'Modelo no inicializado correctamente'}), 500
 
-        # Verificar si se solicita un modelo diferente
+        # Si se solicita un modelo diferente, ignoramos esa solicitud y usamos el modelo actual
         requested_model = data.get("model")
-        requested_type = data.get("type_models", "t2im")
-        
-        # Si se solicita un modelo diferente al actual, cambiamos
-        current_model = app.config['SERVER_CONFIG'].model
-        current_type = app.config['SERVER_CONFIG'].type_models
-        
-        if (requested_model and requested_model != current_model) or (requested_type != current_type):
-            logger.info(f"Cambiando modelo de {current_model} a {requested_model or current_model}")
-            
-            # Actualizamos la configuración
-            if requested_model:
-                app.config['SERVER_CONFIG'].model = requested_model
-            app.config['SERVER_CONFIG'].type_models = requested_type
-            
-            # Creamos nuevo router y pipeline
-            model_router = RouteModels(
-                model=app.config['SERVER_CONFIG'].model,
-                type_models=app.config['SERVER_CONFIG'].type_models
-            )
-            model_pipeline = model_router.get_pipeline()
-            model_pipeline.start()
-            
-            # Actualizamos en app.config
-            app.config["MODEL_ROUTER"] = model_router
-            app.config["MODEL_PIPELINE"] = model_pipeline
+        if requested_model and requested_model != app.config['SERVER_CONFIG'].model:
+            logger.warning(f"Se solicitó el modelo '{requested_model}' pero se utilizará el modelo cargado inicialmente: '{app.config['SERVER_CONFIG'].model}'")
 
         # Extraemos los parámetros de la solicitud
         prompt = data.get("prompt")
@@ -225,33 +142,21 @@ def create_app(config=None):
         num_images = data.get("num_images", 1)
             
         try:
-            # Obtenemos el tipo de modelo actual
-            model_type = None
-            preset_models = PresetModels()
-            current_model = app.config['SERVER_CONFIG'].model
-            
-            if current_model in preset_models.SD3 or current_model in preset_models.SD3_5:
-                pipeline_class = StableDiffusion3Pipeline
-            elif current_model in preset_models.Flux:
-                pipeline_class = FluxPipeline
-            else:
-                pipeline_class = StableDiffusionPipeline
-                
-            # Clonamos el scheduler para thread-safety
+            # Usamos directamente el pipeline cargado, pero clonamos el scheduler para thread-safety
             scheduler = model_pipeline.pipeline.scheduler.from_config(model_pipeline.pipeline.scheduler.config)
             
-            # Creamos una instancia específica para esta solicitud
-            return_pipeline = ReturnPipelines(
-                model=current_model,
-                type_models=app.config['SERVER_CONFIG'].type_models,
-                scheduler=scheduler
-            )
+            # Determinar el tipo de pipeline para clonar correctamente
+            model_type = model_initializer.model_type
             
-            # Obtenemos el pipeline optimizado para esta solicitud
-            pipeline = return_pipeline.return_pipeline()
+            if model_type in ["SD3", "SD3_5"]:
+                pipeline = StableDiffusion3Pipeline.from_pipe(model_pipeline.pipeline, scheduler=scheduler)
+            elif model_type == "Flux":
+                pipeline = FluxPipeline.from_pipe(model_pipeline.pipeline, scheduler=scheduler)
+            else:
+                pipeline = StableDiffusionPipeline.from_pipe(model_pipeline.pipeline, scheduler=scheduler)
             
             # Configuramos el generador
-            generator = torch.Generator(device=model_router.device)
+            generator = torch.Generator(device=model_initializer.device)
             generator.manual_seed(random.randint(0, 10000000))
             
             # Procesamos la inferencia
@@ -270,6 +175,13 @@ def create_app(config=None):
                 image_url = save_image(output.images[i])
                 image_urls.append(image_url)
                 
+            # Limpieza después de inferencia (solo el pipeline clonado, mantenemos el original)
+            del pipeline
+            del output
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                
             return jsonify({'response': image_urls})
             
         except Exception as e:
@@ -282,13 +194,34 @@ def create_app(config=None):
     
     @app.route('/api/models', methods=['GET'])
     def list_models():
-        preset_models = PresetModels()
-        available_models = {
-            "SD3": preset_models.SD3,
-            "SD3_5": preset_models.SD3_5,
-            "Flux": preset_models.Flux,
-            "WanT2V": preset_models.WanT2V
-        }
-        return jsonify(available_models)
+        # Devolvemos solo el modelo actual como disponible
+        return jsonify({
+            "current_model": app.config['SERVER_CONFIG'].model,
+            "type": app.config['SERVER_CONFIG'].type_models,
+            "all_models": {
+                "SD3": PresetModels().SD3,
+                "SD3_5": PresetModels().SD3_5,
+                "Flux": PresetModels().Flux,
+                "WanT2V": PresetModels().WanT2V
+            }
+        })
+    
+    @app.route('/api/status', methods=['GET'])
+    def get_status():
+        memory_info = {}
+        if torch.cuda.is_available():
+            memory_allocated = torch.cuda.memory_allocated() / 1024**3  # GB
+            memory_reserved = torch.cuda.memory_reserved() / 1024**3    # GB
+            memory_info = {
+                "memory_allocated_gb": round(memory_allocated, 2),
+                "memory_reserved_gb": round(memory_reserved, 2),
+                "device": torch.cuda.get_device_name(0)
+            }
+        
+        return jsonify({
+            "current_model": app.config['SERVER_CONFIG'].model,
+            "type_models": app.config['SERVER_CONFIG'].type_models,
+            "memory": memory_info
+        })
     
     return app
