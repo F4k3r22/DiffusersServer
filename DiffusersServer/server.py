@@ -1,14 +1,22 @@
 # server.py
-
+from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import StableDiffusion3Pipeline
+from diffusers.pipelines.flux.pipeline_flux import FluxPipeline
+from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import StableDiffusionPipeline
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from .Pipelines import *
+from .Pipelines import TextToImagePipelineSD3, TextToImagePipelineFlux, TextToImagePipelineSD
+#from .VideoPipelines import WanT2VPipelines
+import logging
+from diffusers.utils import export_to_video
 import random
 import uuid
 import tempfile
 from dataclasses import dataclass
+import os
+import torch
 
 service_url = 'http://localhost:8500'
+logger = logging.getLogger(__name__)
 
 image_dir = os.path.join(tempfile.gettempdir(), "images")
 if not os.path.exists(image_dir):
@@ -24,6 +32,19 @@ def save_image(image):
 @dataclass
 class ServerConfigModels:
     model: str = ''
+    type_models: str = 't2im' # Solo hay t2im y t2v (Por ahorita aún en desarrollo y solo compatible con WanT2V)
+
+@dataclass
+class PresetModels:
+    SD3 : list = ['stabilityai/stable-diffusion-3-medium']
+    SD3_5: list = ['stabilityai/stable-diffusion-3.5-large', 'stabilityai/stable-diffusion-3.5-large-turbo', 'stabilityai/stable-diffusion-3.5-medium']
+    Flux: list = ['black-forest-labs/FLUX.1-dev', 'black-forest-labs/FLUX.1-schnell']
+    WanT2V: list = ['Wan-AI/Wan2.1-T2V-14B-Diffusers', 'Wan-AI/Wan2.1-T2V-1.3B-Diffusers']
+
+
+class RouteModels:
+    def __init__(self, model: str = '', type_models: str = 't2im'):
+        pass
 
 def create_app(config=None):
     app = Flask(__name__)
