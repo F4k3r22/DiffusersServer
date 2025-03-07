@@ -97,7 +97,7 @@ class TextToImagePipelineSD:
         Si no se proporciona, se obtiene de la variable de entorno.
         """
         self.model_path = model_path or os.getenv("MODEL_PATH")
-        self.pipeline: FluxPipeline = None
+        self.pipeline: StableDiffusionPipeline = None
         self.device: str = None
 
     def start(self):

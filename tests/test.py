@@ -5,7 +5,7 @@ import re
 import urllib.parse
 
 # URL del servidor
-server_url = "http://localhost:8500/api/inference"
+server_url = "http://localhost:8500/api/diffusers/inference"
 base_url = "http://localhost:8500"  
 
 # Datos para enviar
