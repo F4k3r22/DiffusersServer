@@ -1,3 +1,5 @@
+# Pipelines.py
+
 from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import StableDiffusion3Pipeline
 import torch
 import os
@@ -21,7 +23,6 @@ class TextToImagePipelineSD3:
         self.model_path = model_path or os.getenv("MODEL_PATH")
         self.pipeline: StableDiffusion3Pipeline = None
         self.device: str = None
-        self.start()
 
     def start(self):
         """
@@ -36,7 +37,7 @@ class TextToImagePipelineSD3:
             self.device = "cuda"
             self.pipeline = StableDiffusion3Pipeline.from_pretrained(
                 model_path,
-                torch_dtype=torch.bfloat16,
+                torch_dtype=torch.float16,
             ).to(device=self.device)
         elif torch.backends.mps.is_available():
             # Si no se definió model_path, se asigna el valor por defecto para MPS.

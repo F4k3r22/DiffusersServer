@@ -1,10 +1,12 @@
+# create_server.py
+
 from .Pipelines import *
 from .server import *
 from .waitress_server import *
 
 # Función principal para iniciar un servidor completo
 def create_inference_server(
-    model=None,
+    model:str,
     threads=5,
     enable_memory_monitor=True
 ):

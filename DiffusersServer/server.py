@@ -1,4 +1,6 @@
-from flask import Flask, request, jsonify
+# server.py
+
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from .Pipelines import *
 import random
@@ -21,16 +23,19 @@ def save_image(image):
 
 @dataclass
 class ServerConfigModels:
-    model: str = None
+    model: str = ''
 
 def create_app(config=None):
     app = Flask(__name__)
     CORS(app)
     app.config['SERVER_CONFIG'] = config or ServerConfigModels()
-    # Carga del modelo en memoria al iniciar la aplicación
-    model_pipeline = TextToImagePipelineSD3()
-    model_pipeline.start()
+    
+    # Carga del modelo en memoria al iniciar la aplicación, una sola vez
+    logger.info("Inicializando pipeline de modelo...")
+    model_pipeline = TextToImagePipelineSD3(config.model if config else None)
+    model_pipeline.start()  # Solo una llamada a start()
     app.config["MODEL_PIPELINE"] = model_pipeline
+    logger.info("Pipeline inicializado y guardado en app.config")
 
     @app.route('/api/inference', methods=['POST'])
     def api():
@@ -39,20 +44,36 @@ def create_app(config=None):
             return jsonify({'error': 'No data provided'}), 400
 
         # Recuperamos el pipeline cargado previamente
-        server_config = app.config['SERVER_CONFIG']
-        model_pipeline = server_config.model if server_config.model is not None else data['MODEL_PIPELINE']
+        model_pipeline = app.config["MODEL_PIPELINE"]
+        if not model_pipeline or not model_pipeline.pipeline:
+            return jsonify({'error': 'Modelo no inicializado correctamente'}), 500
 
         prompt = data.get("prompt")
-        # Si tu modelo o scheduler no son thread-safe, es recomendable clonar el scheduler
-        scheduler = model_pipeline.pipeline.scheduler.from_config(model_pipeline.pipeline.scheduler.config)
-        pipeline = StableDiffusion3Pipeline.from_pipe(model_pipeline.pipeline, scheduler=scheduler)
-        
-        generator = torch.Generator(device=model_pipeline.device)
-        generator.manual_seed(random.randint(0, 10000000))
-        output = pipeline(prompt, generator=generator)
-        
-        # Aquí guardarías la imagen y devolverías la respuesta
-        image_url = save_image(output.images[0])
-        return jsonify({'response': image_url})
+        if not prompt:
+            return jsonify({'error': 'No se proporcionó prompt'}), 400
+            
+        try:
+            # Si tu modelo o scheduler no son thread-safe, es recomendable clonar el scheduler
+            scheduler = model_pipeline.pipeline.scheduler.from_config(model_pipeline.pipeline.scheduler.config)
+            pipeline = StableDiffusion3Pipeline.from_pipe(model_pipeline.pipeline, scheduler=scheduler)
+            
+            generator = torch.Generator(device=model_pipeline.device)
+            generator.manual_seed(random.randint(0, 10000000))
+            
+            logger.info(f"Procesando prompt: {prompt[:50]}...")
+            output = pipeline(prompt, generator=generator)
+            
+            # Aquí guardarías la imagen y devolverías la respuesta
+            image_url = save_image(output.images[0])
+            return jsonify({'response': image_url})
+        except Exception as e:
+            logger.error(f"Error en inferencia: {str(e)}")
+            return jsonify({'error': f'Error en procesamiento: {str(e)}'}), 500
+
+    @app.route('/images/<filename>')
+    def serve_image(filename):
+        import tempfile
+        image_dir = os.path.join(tempfile.gettempdir(), "images")
+        return send_from_directory(image_dir, filename)
     
     return app
