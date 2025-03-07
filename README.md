@@ -49,9 +49,10 @@ Compatible con **Stable Diffusion 3**, **Stable Diffusion 3.5**, **Flux**, y **S
 ---
 
 ## 🚀 DiffusersServer está diseñado para ofrecer una solución ligera, rápida y flexible para la generación de imágenes a partir de texto.
-Si te gusta el proyecto, ¡considera darle una ⭐ en GitHub!
 
---- 
+Si te gusta el proyecto, ¡considera darle una ⭐!
+
+---
 
 ## 🚀 Planes a Futuro
 
@@ -59,7 +60,7 @@ Estamos trabajando en la integración de una API para modelos Text-to-Video (T2V
 
 Tambien estamos trabajando en una mejor integración en los modelos pre existente T2Img de Diffusers
 
---- 
+---
 
 # Donaciones 💸
 
