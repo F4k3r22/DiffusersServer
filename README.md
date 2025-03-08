@@ -59,6 +59,11 @@ cd DiffusersServer
 pip install .
 ```
 
+## 🚀Instalar DiffusersServer via Pypi
+```bash
+pip install DiffusersServer
+```
+
 ## 🖥️Iniciar tu servidor
 ```python
 from DiffusersServer import DiffusersServerApp
