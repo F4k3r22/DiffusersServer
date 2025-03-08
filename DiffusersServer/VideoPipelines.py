@@ -1,10 +1,12 @@
 # VideoPipelines.py
 
 import torch
-from diffusers import AutoencoderKLWan, WanPipeline
+from diffusers.pipelines.wan import WanPipeline
+from diffusers.models.autoencoders.autoencoder_kl_wan import AutoencoderKLWan
 import os
 import logging
 from pydantic import BaseModel
+from diffusers.pipelines.ltx import LTXPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -43,4 +45,31 @@ class WanT2VPipelines:
             ).to(device=self.device)
         else:
             raise Exception("No CUDA or MPS device available")
-        
+
+class LTXT2VPipelines:
+    def __init__(self, model_path: str | None = None):
+        """
+        Inicialización de la clase con la ruta del modelo.
+        Si no se proporciona, se obtiene de la variable de entorno.
+        """
+        self.model_path = model_path or os.getenv("MODEL_PATH")
+        self.pipeline: WanPipeline = None
+        self.device: str = None
+
+    def start(self):
+        if torch.cuda.is_available():
+            model_path = self.model_path or "Lightricks/LTX-Video"
+            logger.info("Loading CUDA")
+            self.device = "cuda"
+            self.pipeline = LTXPipeline(model_path, 
+                torch_dtype=torch.bfloat16,
+            ).to(device=self.device)
+        elif  torch.backends.mps.is_available():
+            model_path = self.model_path or "Lightricks/LTX-Video"
+            logger.info("Loading MPS for Mac M Series")
+            self.device = "mps"
+            self.pipeline = LTXPipeline(model_path, 
+                torch_dtype=torch.bfloat16,
+            ).to(device=self.device)
+        else:
+            raise Exception("No CUDA or MPS device available")

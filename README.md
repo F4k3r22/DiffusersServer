@@ -160,6 +160,12 @@ Tambien estamos trabajando en una mejor integración en los modelos pre existent
 
 ---
 
+## Para modelos T2V
+Primero instala diffusers desde la rama main del repositorio de diffusers
+```bash
+pip install git+https://github.com/huggingface/diffusers
+```
+
 # Donaciones 💸
 
 Si deseas apoyar este proyecto, puedes hacer una donación a través de PayPal:

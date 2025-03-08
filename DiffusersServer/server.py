@@ -26,6 +26,7 @@ class PresetModels:
     SD3_5: List[str] = field(default_factory=lambda: ['stabilityai/stable-diffusion-3.5-large', 'stabilityai/stable-diffusion-3.5-large-turbo', 'stabilityai/stable-diffusion-3.5-medium'])
     Flux: List[str] = field(default_factory=lambda: ['black-forest-labs/FLUX.1-dev', 'black-forest-labs/FLUX.1-schnell'])
     WanT2V: List[str] = field(default_factory=lambda: ['Wan-AI/Wan2.1-T2V-14B-Diffusers', 'Wan-AI/Wan2.1-T2V-1.3B-Diffusers'])
+    LTXVideo: List[str] = field(default_factory=lambda: ['Lightricks/LTX-Video'])
 
 class ModelPipelineInitializer:
     def __init__(self, model: str = '', type_models: str = 't2im'):
@@ -199,10 +200,13 @@ def create_app(config=None):
             "current_model": app.config['SERVER_CONFIG'].model,
             "type": app.config['SERVER_CONFIG'].type_models,
             "all_models": {
+                "type": "T2Img",
                 "SD3": PresetModels().SD3,
                 "SD3_5": PresetModels().SD3_5,
                 "Flux": PresetModels().Flux,
-                "WanT2V": PresetModels().WanT2V
+                "type": "T2V",
+                "WanT2V": PresetModels().WanT2V,
+                "LTX-Video": PresetModels().LTXVideo,
             }
         })
     
@@ -222,6 +226,13 @@ def create_app(config=None):
             "current_model": app.config['SERVER_CONFIG'].model,
             "type_models": app.config['SERVER_CONFIG'].type_models,
             "memory": memory_info
+        })
+    
+    @app.route('/api/diffusers/video/inference', methods=['POST'])
+    def api_video():
+        return jsonify({
+            "status": "En desarrollo",
+            "description": "Los modelos de Text-to-Video (T2V) se encuentran actualmente en fase de implementación. Agradecemos su paciencia mientras optimizamos esta funcionalidad."
         })
     
     return app
