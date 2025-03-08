@@ -1,10 +1,13 @@
 [project]
 name = "DiffusersServer"
-version = "0.1.3"
+version = "0.1.31"
 description = "Nueva solución tipo Ollama pero para modelos de Text2Img"
 authors = [
     { name = "Rivera.ai/Fredy Rivera", email = "riveraaai200678@gmail.com" }
 ]
+
+readme = "README.md"
+
 requires-python = ">=3.8"
 dependencies = [
     "Flask",
