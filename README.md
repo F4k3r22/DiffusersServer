@@ -163,9 +163,11 @@ memory_list = get_memory_usage()
 
 ## 🚀 Planes a Futuro
 
-Estamos trabajando en la integración de una API para modelos Text-to-Video (T2V), comenzando con Wan 2.1. Esto permitirá generar videos a partir de texto, ampliando las capacidades de DiffusersServer más allá de la generación de imágenes.
+Actualmente estamos trabajando en:
 
-Tambien estamos trabajando en una mejor integración en los modelos pre existente T2Img de Diffusers
+- **Mejorar y optimizar la integración de los modelos Text-to-Image (T2Img) y Text-to-Video (T2V)**
+- **Desarrollar un sistema que permita a los usuarios crear Pipelines personalizados para sus propias API's**
+- **Ampliar las capacidades de personalización según las necesidades específicas de cada proyecto**
 
 ---
 
@@ -178,11 +180,14 @@ pip install git+https://github.com/huggingface/diffusers
 ```
 
 ### Requisitos minimos para una inferencia óptima
+
 Para una inferencia óptima, se recomienda:
+
 - **GPU con al menos 48GB de VRAM**
 - **Sistema con 64GB de RAM**
 
 ### Levantar tu servidor para modelos T2V
+
 ```python
 from DiffusersServer import DiffusersServerApp
 
@@ -191,9 +196,11 @@ app = DiffusersServerApp(
     type_model='t2v'
 )
 ```
+
 ### Peticiones
 
 #### Generar un video
+
 ```python
 import requests
 import os
@@ -212,7 +219,7 @@ def generate_video(prompt : str):
         video_url = result['response']
         print("¡Solicitud exitosa!")
         print(f"URL del video generado: {video_url}")
-    
+  
     except Exception as e:
         print(str(e))
 
@@ -220,6 +227,7 @@ generate_video("Police cars chasing a Ferrari in Miami at dusk with gunshots, ex
 ```
 
 #### Descargar el video generado
+
 ```python
 import requests
 import os
@@ -227,33 +235,33 @@ import os
 def download_video(filename, ruta_destino=None):
     """
     Descarga un video usando la API de Flask.
-    
+  
     Args:
         filename: Nombre del archivo a descargar
         ruta_destino: Ruta donde guardar el archivo (opcional)
-    
+  
     Returns:
         str: Ruta donde se guardó el archivo
     """
     base_url = "http://127.0.0.1:8500"
-    
+  
     # Construir URL completa
     url = f"{base_url}/video/{filename}"
-    
+  
     # Realizar la petición
     response = requests.get(url, stream=True)
-    
+  
     # Verificar si la petición fue exitosa
     if response.status_code == 200:
         # Determinar ruta de destino
         if ruta_destino is None:
             ruta_destino = os.path.join(os.getcwd(), filename)
-        
+      
         # Guardar el archivo
         with open(ruta_destino, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-        
+      
         print(f"Video descargado y guardado en: {ruta_destino}")
         return ruta_destino
     else:
@@ -262,6 +270,7 @@ def download_video(filename, ruta_destino=None):
 
 download = download_video("videoff52dbc5.mp4")
 ```
+
 # Donaciones 💸
 
 Si deseas apoyar este proyecto, puedes hacer una donación a través de PayPal:
