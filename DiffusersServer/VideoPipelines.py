@@ -1,12 +1,12 @@
 # VideoPipelines.py
 
 import torch
-from diffusers.pipelines.wan import WanPipeline
+from diffusers.pipelines.wan.pipeline_wan import WanPipeline
 from diffusers.models.autoencoders.autoencoder_kl_wan import AutoencoderKLWan
 import os
 import logging
 from pydantic import BaseModel
-from diffusers.pipelines.ltx import LTXPipeline
+from diffusers.pipelines.ltx.pipeline_ltx import LTXPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -30,17 +30,17 @@ class WanT2VPipelines:
             logger.info("Loading CUDA")
             self.device = "cuda"
             self.vae = AutoencoderKLWan.from_pretrained(model_path, subfolder="vae", torch_dtype=torch.float32)
-            self.pipeline = WanPipeline(model_path, 
-                vae=self.vae, 
-                torch_dtype=torch.bfloat16,
+            self.pipeline = WanPipeline.from_pretrained(model_path,
+            torch_dtype=torch.bfloat16,
+            vae=self.vae,
             ).to(device=self.device)
         elif  torch.backends.mps.is_available():
             model_path = self.model_path or "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
             logger.info("Loading MPS for Mac M Series")
             self.device = "mps"
             self.vae = AutoencoderKLWan.from_pretrained(model_path, subfolder="vae", torch_dtype=torch.float32)
-            self.pipeline = WanPipeline(model_path, 
-                vae=self.vae, 
+            self.pipeline = WanPipeline.from_pretrained(model_path, 
+                vae=self.vae,
                 torch_dtype=torch.bfloat16,
             ).to(device=self.device)
         else:
@@ -53,7 +53,7 @@ class LTXT2VPipelines:
         Si no se proporciona, se obtiene de la variable de entorno.
         """
         self.model_path = model_path or os.getenv("MODEL_PATH")
-        self.pipeline: WanPipeline = None
+        self.pipeline: LTXPipeline = None
         self.device: str = None
 
     def start(self):
@@ -61,14 +61,14 @@ class LTXT2VPipelines:
             model_path = self.model_path or "Lightricks/LTX-Video"
             logger.info("Loading CUDA")
             self.device = "cuda"
-            self.pipeline = LTXPipeline(model_path, 
+            self.pipeline = LTXPipeline.from_pretrained(model_path, 
                 torch_dtype=torch.bfloat16,
             ).to(device=self.device)
         elif  torch.backends.mps.is_available():
             model_path = self.model_path or "Lightricks/LTX-Video"
             logger.info("Loading MPS for Mac M Series")
             self.device = "mps"
-            self.pipeline = LTXPipeline(model_path, 
+            self.pipeline = LTXPipeline.from_pretrained(model_path, 
                 torch_dtype=torch.bfloat16,
             ).to(device=self.device)
         else:

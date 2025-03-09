@@ -53,6 +53,7 @@ Compatible con **Stable Diffusion 3**, **Stable Diffusion 3.5**, **Flux**, y **S
 Si te gusta el proyecto, ¡considera darle una ⭐!
 
 ## 🚀Instalar DiffusersServer
+
 ```bash
 git clone https://github.com/F4k3r22/DiffusersServer.git
 cd DiffusersServer
@@ -60,11 +61,13 @@ pip install .
 ```
 
 ## 🚀Instalar DiffusersServer via Pypi
+
 ```bash
 pip install DiffusersServer
 ```
 
 ## 🖥️Iniciar tu servidor
+
 ```python
 from DiffusersServer import DiffusersServerApp
 
@@ -75,11 +78,13 @@ app = DiffusersServerApp(
     enable_memory_monitor=True
 )
 ```
+
 Asi de facil es levantar tu servidor de inferencia local con DiffusersServer en menos de 20 lineas de código
 
 ## ⚡Peticiones a tu servidor
 
 ### Generar una imagen
+
 ```python
 import requests
 import json
@@ -121,7 +126,9 @@ if response.status_code == 200:
 ```
 
 ## Stats del Servidor
+
 ### Listar modelos disponibles
+
 ```python
 import requests
 
@@ -135,7 +142,9 @@ def list_models():
 
 list_models_api = list_models()
 ```
+
 ### Obtener el uso de Memoria del Servidor
+
 ```python
 import requests
 
@@ -161,11 +170,98 @@ Tambien estamos trabajando en una mejor integración en los modelos pre existent
 ---
 
 ## Para modelos T2V
-Primero instala diffusers desde la rama main del repositorio de diffusers
+
+Para utilizar los modelos T2V, primero debes instalar la versión más reciente de `diffusers` directamente desde el repositorio principal:
+
 ```bash
 pip install git+https://github.com/huggingface/diffusers
 ```
 
+### Requisitos minimos para una inferencia óptima
+Para una inferencia óptima, se recomienda:
+- **GPU con al menos 48GB de VRAM**
+- **Sistema con 64GB de RAM**
+
+### Levantar tu servidor para modelos T2V
+```python
+from DiffusersServer import DiffusersServerApp
+
+app = DiffusersServerApp(
+    model='Wan-AI/Wan2.1-T2V-1.3B-Diffusers',
+    type_model='t2v'
+)
+```
+### Peticiones
+
+#### Generar un video
+```python
+import requests
+import os
+
+def generate_video(prompt : str):
+    url = 'http://127.0.0.1:8500/api/diffusers/video/inference'
+    payload = {
+        "prompt": prompt
+    }
+
+    print(f"Petición con el prompt: {prompt}")
+
+    try:
+        response = requests.post(url=url, json=payload)
+        result = response.json()
+        video_url = result['response']
+        print("¡Solicitud exitosa!")
+        print(f"URL del video generado: {video_url}")
+    
+    except Exception as e:
+        print(str(e))
+
+generate_video("Police cars chasing a Ferrari in Miami at dusk with gunshots, explosions and lots of chaos and speed, cinematic and action style")
+```
+
+#### Descargar el video generado
+```python
+import requests
+import os
+
+def download_video(filename, ruta_destino=None):
+    """
+    Descarga un video usando la API de Flask.
+    
+    Args:
+        filename: Nombre del archivo a descargar
+        ruta_destino: Ruta donde guardar el archivo (opcional)
+    
+    Returns:
+        str: Ruta donde se guardó el archivo
+    """
+    base_url = "http://127.0.0.1:8500"
+    
+    # Construir URL completa
+    url = f"{base_url}/video/{filename}"
+    
+    # Realizar la petición
+    response = requests.get(url, stream=True)
+    
+    # Verificar si la petición fue exitosa
+    if response.status_code == 200:
+        # Determinar ruta de destino
+        if ruta_destino is None:
+            ruta_destino = os.path.join(os.getcwd(), filename)
+        
+        # Guardar el archivo
+        with open(ruta_destino, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        print(f"Video descargado y guardado en: {ruta_destino}")
+        return ruta_destino
+    else:
+        print(f"Error al descargar el video. Código de estado: {response.status_code}")
+        return None
+
+download = download_video("videoff52dbc5.mp4")
+```
 # Donaciones 💸
 
 Si deseas apoyar este proyecto, puedes hacer una donación a través de PayPal:

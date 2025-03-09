@@ -3,11 +3,11 @@
 from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import StableDiffusion3Pipeline
 from diffusers.pipelines.flux.pipeline_flux import FluxPipeline
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import StableDiffusionPipeline
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, make_response, Response
 from flask_cors import CORS
 from .Pipelines import TextToImagePipelineSD3, TextToImagePipelineFlux, TextToImagePipelineSD
 import logging
-from diffusers.utils import export_to_video
+from diffusers.utils.export_utils import export_to_video
 import random
 import uuid
 import tempfile
@@ -15,7 +15,7 @@ from dataclasses import dataclass
 import os
 import torch
 import gc
-
+from typing import Union, Tuple
 from dataclasses import dataclass, field
 from typing import List
 
@@ -82,7 +82,7 @@ class ModelPipelineInitializer:
                     print('No se pudo importar correctamente, verifica tu versión de diffusers')
                     pass
             else:
-                raise ValueError(f"Model type {self.model_type} not supported for text-to-video")
+                pass
         else:
             raise ValueError(f"Unsupported type_models: {self.type_models}")
 
@@ -109,11 +109,11 @@ def save_image(image):
     return os.path.join(service_url, "images", filename)
 
 def save_video(video, fps):
-    filename = "video" + str(uuid.uuid4())
+    filename = "video" + str(uuid.uuid4()).split("-")[0] + ".mp4"
     video_path = os.path.join(video_dir, filename)
     export = export_to_video(video, video_path, fps=fps)
     logger.info(f"Saving video to {video_path}")
-    return os.path(service_url, "video", filename)
+    return os.path.join(service_url, "video", filename)
 
 
 @dataclass
@@ -254,12 +254,12 @@ def create_app(config=None):
         })
     
     @app.route('/api/diffusers/video/inference', methods=['POST'])
-    def api_video():
+    def api_video() -> Union[Response, Tuple[Response, int]]:
         if configs.type_models == 't2v':
             try:
-                from diffusers.pipelines.wan import WanPipeline
-                from diffusers.pipelines.ltx import LTXPipeline
-                
+                from diffusers.pipelines.wan.pipeline_wan import WanPipeline
+                from diffusers.pipelines.ltx.pipeline_ltx import LTXPipeline
+            
                 data = request.get_json()
                 if not data:
                     return jsonify({'error': 'No data provided'}), 400
@@ -279,56 +279,68 @@ def create_app(config=None):
                 prompt = data.get("prompt")
                 if not prompt:
                     return jsonify({'error': 'No se proporcionó prompt'}), 400
-                
+            
                 height = data.get("height", 480)
                 width = data.get("width", 832)
                 num_frames = data.get("num_frames", 81)
-                num_iference_steps = data.get("num_iference_steps", 50)
+                num_inference_steps = data.get("num_inference_steps", 50)
                 fps = data.get("fps", 15)
 
-                
                 try:
+                    # Solo clonamos el scheduler para thread-safety
                     scheduler = model_pipeline.pipeline.scheduler.from_config(model_pipeline.pipeline.scheduler.config)
-                    vae = model_pipeline.pipeline.vae.from_config(model_pipeline.pipeline.vae.config)
-            
+        
                     # Determinar el tipo de pipeline para clonar correctamente
                     model_type = model_initializer.model_type
 
-                    if model_type in ["WanT2V"]:
-                        pipeline = WanPipeline.from_pipe(model_pipeline.pipeline, scheduler=scheduler, vae=vae)
-                    elif  model_type == "LTXVideo":
+                    # Configurar generador con semilla aleatoria para reproducibilidad
+                    generator = torch.Generator(device=model_initializer.device)
+                    generator.manual_seed(random.randint(0, 10000000))
+
+                    if model_type == "WanT2V":
+                        pipeline = WanPipeline.from_pipe(model_pipeline.pipeline, scheduler=scheduler)
+                    elif model_type == "LTXVideo":
                         pipeline = LTXPipeline.from_pipe(model_pipeline.pipeline, scheduler=scheduler)
                     else:
-                        raise RuntimeError("Modelo incompatible")
-                    
-                    logger.info(f"Procesando prompt: {prompt[:50]}...")
+                        raise RuntimeError(f"Modelo {model_type} incompatible con T2V")
+                
+                    logger.info(f"Procesando prompt para video: {prompt[:50]}...")
                     output = pipeline(
                         prompt,
                         height=height,
                         width=width,
                         num_frames=num_frames,
-                        num_inference_steps=num_iference_steps
-                        ).frames[0]
-                    
+                        num_inference_steps=num_inference_steps,
+                        generator=generator
+                    ).frames[0]
+                
                     video_url = save_video(output, fps=fps)
+                
+                    # Limpieza exhaustiva de recursos
+                    del scheduler
                     del pipeline
                     del output
                     gc.collect()
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
+                        torch.cuda.synchronize()  # Asegurar que todas las operaciones CUDA terminen
 
-                    return jsonify({'response': video_url})
-                
+                    return make_response(jsonify({'response': video_url}), 200)
+            
                 except Exception as e:
-                    logger.error(f"Error en inferencia: {str(e)}")
-                    return jsonify({'error': f'Error en procesamiento: {str(e)}'}), 500
+                    logger.error(f"Error en inferencia de video: {str(e)}")
+                    # Intentar limpieza incluso en caso de error
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    return jsonify({'error': f'Error en procesamiento de video: {str(e)}'}), 500
 
             except ImportError as e:
-                pass
+                logger.error(f"Error de importación para T2V: {str(e)}")
+                return jsonify({'error': 'Dependencias de T2V no disponibles'}), 500
         else:
             return jsonify({
-                "status": "En desarrollo",
-                "description": "Los modelos de Text-to-Video (T2V) se encuentran actualmente en fase de implementación. Agradecemos su paciencia mientras optimizamos esta funcionalidad."
+                "response": "El servidor está operando en modo T2Img. Para utilizar esta API, por favor cambie al modo de generación de video."
             })
         
     @app.route('/video/<filename>')
