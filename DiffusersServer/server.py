@@ -6,7 +6,6 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import Stabl
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from .Pipelines import TextToImagePipelineSD3, TextToImagePipelineFlux, TextToImagePipelineSD
-#from .VideoPipelines import WanT2VPipelines
 import logging
 from diffusers.utils import export_to_video
 import random
@@ -52,6 +51,8 @@ class ModelPipelineInitializer:
             self.model_type = "Flux"
         elif self.model in preset_models.WanT2V:
             self.model_type = "WanT2V"
+        elif self.model in preset_models.LTXVideo:
+            self.model_type = "LTXVideo"
         else:
             self.model_type = "SD"
 
@@ -67,9 +68,19 @@ class ModelPipelineInitializer:
                 raise ValueError(f"Model type {self.model_type} not supported for text-to-image")
         elif self.type_models == 't2v':
             if self.model_type == "WanT2V":
-                # Uncomment when VideoPipelines is implemented
-                # self.pipeline = WanT2VPipelines(self.model)
-                raise NotImplementedError("Text-to-video pipeline not yet implemented")
+                try: 
+                    from .VideoPipelines import WanT2VPipelines
+                    self.pipeline = WanT2VPipelines(self.model)
+                except ImportError as e:
+                    print('No se pudo importar correctamente, verifica tu versión de diffusers')
+                    pass
+            if self.model_type == "LTXVideo":
+                try:
+                    from .VideoPipelines import LTXT2VPipelines
+                    self.pipeline = LTXT2VPipelines(self.model)
+                except ImportError as e:
+                    print('No se pudo importar correctamente, verifica tu versión de diffusers')
+                    pass
             else:
                 raise ValueError(f"Model type {self.model_type} not supported for text-to-video")
         else:
@@ -86,12 +97,24 @@ image_dir = os.path.join(tempfile.gettempdir(), "images")
 if not os.path.exists(image_dir):
     os.makedirs(image_dir)
 
+video_dir = os.path.join(tempfile.gettempdir(), "videos")
+if not os.path.exists(video_dir):
+    os.makedirs(video_dir)
+
 def save_image(image):
     filename = "draw" + str(uuid.uuid4()).split("-")[0] + ".png"
     image_path = os.path.join(image_dir, filename)
     logger.info(f"Saving image to {image_path}")
     image.save(image_path)
     return os.path.join(service_url, "images", filename)
+
+def save_video(video, fps):
+    filename = "video" + str(uuid.uuid4())
+    video_path = os.path.join(video_dir, filename)
+    export = export_to_video(video, video_path, fps=fps)
+    logger.info(f"Saving video to {video_path}")
+    return os.path(service_url, "video", filename)
+
 
 @dataclass
 class ServerConfigModels:
@@ -102,6 +125,8 @@ def create_app(config=None):
     app = Flask(__name__)
     CORS(app)
     app.config['SERVER_CONFIG'] = config or ServerConfigModels()
+
+    configs = config or ServerConfigModels()
     
     # Inicialización del pipeline de modelo único
     logger.info(f"Inicializando pipeline para el modelo: {app.config['SERVER_CONFIG'].model}")
@@ -230,9 +255,89 @@ def create_app(config=None):
     
     @app.route('/api/diffusers/video/inference', methods=['POST'])
     def api_video():
-        return jsonify({
-            "status": "En desarrollo",
-            "description": "Los modelos de Text-to-Video (T2V) se encuentran actualmente en fase de implementación. Agradecemos su paciencia mientras optimizamos esta funcionalidad."
-        })
+        if configs.type_models == 't2v':
+            try:
+                from diffusers.pipelines.wan import WanPipeline
+                from diffusers.pipelines.ltx import LTXPipeline
+                
+                data = request.get_json()
+                if not data:
+                    return jsonify({'error': 'No data provided'}), 400
+
+                model_pipeline = app.config["MODEL_PIPELINE"]
+                model_initializer = app.config["MODEL_INITIALIZER"]
+
+                if not model_pipeline or not model_pipeline.pipeline:
+                    return jsonify({'error': 'Modelo no inicializado correctamente'}), 500
+
+                # Si se solicita un modelo diferente, ignoramos esa solicitud y usamos el modelo actual
+                requested_model = data.get("model")
+                if requested_model and requested_model != app.config['SERVER_CONFIG'].model:
+                    logger.warning(f"Se solicitó el modelo '{requested_model}' pero se utilizará el modelo cargado inicialmente: '{app.config['SERVER_CONFIG'].model}'")
+
+                # Extraemos los parámetros de la solicitud
+                prompt = data.get("prompt")
+                if not prompt:
+                    return jsonify({'error': 'No se proporcionó prompt'}), 400
+                
+                height = data.get("height", 480)
+                width = data.get("width", 832)
+                num_frames = data.get("num_frames", 81)
+                num_iference_steps = data.get("num_iference_steps", 50)
+                fps = data.get("fps", 15)
+
+                
+                try:
+                    scheduler = model_pipeline.pipeline.scheduler.from_config(model_pipeline.pipeline.scheduler.config)
+                    vae = model_pipeline.pipeline.vae.from_config(model_pipeline.pipeline.vae.config)
+            
+                    # Determinar el tipo de pipeline para clonar correctamente
+                    model_type = model_initializer.model_type
+
+                    if model_type in ["WanT2V"]:
+                        pipeline = WanPipeline.from_pipe(model_pipeline.pipeline, scheduler=scheduler, vae=vae)
+                    elif  model_type == "LTXVideo":
+                        pipeline = LTXPipeline.from_pipe(model_pipeline.pipeline, scheduler=scheduler)
+                    else:
+                        raise RuntimeError("Modelo incompatible")
+                    
+                    logger.info(f"Procesando prompt: {prompt[:50]}...")
+                    output = pipeline(
+                        prompt,
+                        height=height,
+                        width=width,
+                        num_frames=num_frames,
+                        num_inference_steps=num_iference_steps
+                        ).frames[0]
+                    
+                    video_url = save_video(output, fps=fps)
+                    del pipeline
+                    del output
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
+                    return jsonify({'response': video_url})
+                
+                except Exception as e:
+                    logger.error(f"Error en inferencia: {str(e)}")
+                    return jsonify({'error': f'Error en procesamiento: {str(e)}'}), 500
+
+            except ImportError as e:
+                pass
+        else:
+            return jsonify({
+                "status": "En desarrollo",
+                "description": "Los modelos de Text-to-Video (T2V) se encuentran actualmente en fase de implementación. Agradecemos su paciencia mientras optimizamos esta funcionalidad."
+            })
+        
+    @app.route('/video/<filename>')
+    def serve_video(filename):
+        if configs.type_models == 't2v':
+            return send_from_directory(video_dir, filename)
+        else:
+            return jsonify({
+                "response" : "Opción no disponible porque el servidor esta ejecutando modelos T2Img"
+            })
     
     return app
