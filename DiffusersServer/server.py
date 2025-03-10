@@ -15,7 +15,7 @@ from dataclasses import dataclass
 import os
 import torch
 import gc
-from typing import Union, Tuple
+from typing import Union, Tuple, Optional, Dict, Any
 from dataclasses import dataclass, field
 from typing import List
 
@@ -120,6 +120,10 @@ def save_video(video, fps):
 class ServerConfigModels:
     model: str = 'stabilityai/stable-diffusion-3-medium'  # Valor predeterminado
     type_models: str = 't2im'  # Solo hay t2im y t2v
+    custom_model : bool = False
+    custom_pipeline : Optional[type]
+    constructor_pipeline: Optional[type]
+    components: Optional[Dict[str, Any]] = None 
 
 def create_app(config=None):
     app = Flask(__name__)

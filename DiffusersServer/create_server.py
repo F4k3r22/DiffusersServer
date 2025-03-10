@@ -9,7 +9,11 @@ def create_inference_server(
     model:str,
     type_model: str = 't2im',
     threads=5,
-    enable_memory_monitor=True
+    enable_memory_monitor=True,
+    custom_model: bool = False,
+    custom_pipeline: Optional[type] | None = None,
+    constructor_pipeline: Optional[type] | None = None,
+    components: Optional[Dict[str, Any]] = None
 ):
     """
     Crea y ejecuta un servidor de inferencia de IA completo.
@@ -26,7 +30,11 @@ def create_inference_server(
     # Configurar valores por defecto
     config = ServerConfigModels(
         model=model,
-        type_models=type_model
+        type_models=type_model,
+        custom_model=custom_model,
+        custom_pipeline=custom_pipeline,
+        constructor_pipeline=constructor_pipeline,
+        components=components
     )
     
     # Crear la aplicación
