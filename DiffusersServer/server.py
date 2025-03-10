@@ -8,6 +8,8 @@ from flask_cors import CORS
 from .Pipelines import TextToImagePipelineSD3, TextToImagePipelineFlux, TextToImagePipelineSD
 import logging
 from diffusers.utils.export_utils import export_to_video
+from diffusers import *
+from .superpipeline import *
 import random
 import uuid
 import tempfile
@@ -123,7 +125,8 @@ class ServerConfigModels:
     custom_model : bool = False
     custom_pipeline : Optional[Type]
     constructor_pipeline: Optional[Type]
-    components: Optional[Dict[str, Any]] = None 
+    components: Optional[Dict[str, Any]] = None
+    api_name: Optional[str] = 'custom'
 
 def create_app(config=None):
     app = Flask(__name__)
@@ -134,12 +137,16 @@ def create_app(config=None):
     
     # Inicialización del pipeline de modelo único
     logger.info(f"Inicializando pipeline para el modelo: {app.config['SERVER_CONFIG'].model}")
-    model_initializer = ModelPipelineInitializer(
-        model=app.config['SERVER_CONFIG'].model,
-        type_models=app.config['SERVER_CONFIG'].type_models
-    )
-    model_pipeline = model_initializer.initialize_pipeline()
-    model_pipeline.start()  # Iniciamos el pipeline
+    if configs.custom_model:
+        model_initializer = configs.constructor_pipeline()
+        model_pipeline = model_initializer.start()
+    else: 
+        model_initializer = ModelPipelineInitializer(
+            model=app.config['SERVER_CONFIG'].model,
+            type_models=app.config['SERVER_CONFIG'].type_models
+        )
+        model_pipeline = model_initializer.initialize_pipeline()
+        model_pipeline.start()  # Iniciamos el pipeline
     app.config["MODEL_PIPELINE"] = model_pipeline
     app.config["MODEL_INITIALIZER"] = model_initializer
     logger.info("Pipeline inicializado y listo para recibir solicitudes")
@@ -354,6 +361,74 @@ def create_app(config=None):
         else:
             return jsonify({
                 "response" : "Opción no disponible porque el servidor esta ejecutando modelos T2Img"
+            })
+    
+    @app.route(f'/api/diffusers/inference/{configs.api_name}')
+    def custom_api():
+        if configs.custom_model:
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'No data provided'}), 400
+
+            # Recuperamos el pipeline cargado
+            model_pipeline = app.config["MODEL_PIPELINE"]
+            model_initializer = app.config["MODEL_INITIALIZER"]
+        
+            if not model_pipeline or not model_pipeline.pipeline:
+                return jsonify({'error': 'Modelo no inicializado correctamente'}), 500
+
+            # Si se solicita un modelo diferente, ignoramos esa solicitud y usamos el modelo actual
+            requested_model = data.get("model")
+            if requested_model and requested_model != app.config['SERVER_CONFIG'].model:
+                logger.warning(f"Se solicitó el modelo '{requested_model}' pero se utilizará el modelo cargado inicialmente: '{app.config['SERVER_CONFIG'].model}'")
+
+            # Extraemos los parámetros de la solicitud
+            prompt = data.get("prompt")
+            if not prompt:
+                return jsonify({'error': 'No se proporcionó prompt'}), 400
+        
+            negative_prompt = data.get("negative_prompt", "")
+            num_inference_steps = data.get("num_inference_steps", 28)
+            num_images = data.get("num_images", 1)
+            try:
+                scheduler = model_pipeline.pipeline.scheduler.from_config(model_pipeline.pipeline.scheduler.config)
+
+                pipeline = configs.custom_pipeline.from_pipe(model_pipeline.pipeline, scheduler=scheduler)
+                # Configuramos el generador
+                generator = torch.Generator(device=model_initializer.device)
+                generator.manual_seed(random.randint(0, 10000000))
+            
+                # Procesamos la inferencia
+                logger.info(f"Procesando prompt: {prompt[:50]}...")
+                output = pipeline(
+                    prompt, 
+                    negative_prompt=negative_prompt, 
+                    generator=generator, 
+                    num_inference_steps=num_inference_steps, 
+                    num_images_per_prompt=num_images
+                )
+
+                # Guardamos la imagen y devolvemos la respuesta
+                image_urls = []
+                for i in range(len(output.images)):
+                    image_url = save_image(output.images[i])
+                    image_urls.append(image_url)
+                
+                # Limpieza después de inferencia (solo el pipeline clonado, mantenemos el original)
+                del pipeline
+                del output
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                
+                return jsonify({'response': image_urls})
+            
+            except Exception as e:
+                logger.error(f"Error en inferencia: {str(e)}")
+                return jsonify({'error': f'Error en procesamiento: {str(e)}'}), 500
+        else:
+            return jsonify({
+                "response" : "Opción no disponible porque el servidor esta ejecutando modelos pre configurados"
             })
     
     return app
