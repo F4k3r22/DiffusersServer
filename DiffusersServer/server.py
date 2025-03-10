@@ -123,8 +123,8 @@ class ServerConfigModels:
     model: str = 'stabilityai/stable-diffusion-3-medium'  # Valor predeterminado
     type_models: str = 't2im'  # Solo hay t2im y t2v
     custom_model : bool = False
-    custom_pipeline : Optional[Type]
-    constructor_pipeline: Optional[Type]
+    custom_pipeline: Optional[Type] = None  # Añadimos valor por defecto
+    constructor_pipeline: Optional[Type] = None  # Añadimos valor por defecto
     components: Optional[Dict[str, Any]] = None
     api_name: Optional[str] = 'custom'
 
@@ -138,7 +138,7 @@ def create_app(config=None):
     # Inicialización del pipeline de modelo único
     logger.info(f"Inicializando pipeline para el modelo: {app.config['SERVER_CONFIG'].model}")
     if configs.custom_model:
-        model_initializer = configs.constructor_pipeline()
+        model_initializer = configs.constructor_pipeline
         model_pipeline = model_initializer.start()
     else: 
         model_initializer = ModelPipelineInitializer(
