@@ -1,14 +1,14 @@
 from diffusers.pipelines import *
 from diffusers  import *
 import torch
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Type
 import logging
 
 logger = logging.getLogger(__name__)
 
 class SuperPipelinesT2Img:
     def __init__(self, model_path: str, 
-                pipeline = type, 
+                pipeline: Type, 
                 torch_dtype = torch.bfloat16, 
                 components: Optional[Dict[str, Any]] = None,):
         """

@@ -11,8 +11,8 @@ def create_inference_server(
     threads=5,
     enable_memory_monitor=True,
     custom_model: bool = False,
-    custom_pipeline: Optional[type] | None = None,
-    constructor_pipeline: Optional[type] | None = None,
+    custom_pipeline: Optional[Type] | None = None,
+    constructor_pipeline: Optional[Type] | None = None,
     components: Optional[Dict[str, Any]] = None
 ):
     """
