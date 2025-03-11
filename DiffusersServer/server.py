@@ -123,10 +123,11 @@ class ServerConfigModels:
     model: str = 'stabilityai/stable-diffusion-3-medium'  # Valor predeterminado
     type_models: str = 't2im'  # Solo hay t2im y t2v
     custom_model : bool = False
+    constructor_pipeline: Optional[Type] = None
     custom_pipeline: Optional[Type] = None  # Añadimos valor por defecto
-    constructor_pipeline: Optional[Type] = None  # Añadimos valor por defecto
     components: Optional[Dict[str, Any]] = None
-    api_name: Optional[str] = 'custom'
+    api_name: Optional[str] = 'custom_api'
+    torch_dtype: Optional[torch.dtype] = None
 
 def create_app(config=None):
     app = Flask(__name__)
@@ -138,7 +139,14 @@ def create_app(config=None):
     # Inicialización del pipeline de modelo único
     logger.info(f"Inicializando pipeline para el modelo: {app.config['SERVER_CONFIG'].model}")
     if configs.custom_model:
-        model_initializer = configs.constructor_pipeline
+        if configs.constructor_pipeline is None:
+            raise ValueError("constructor_pipeline cannot be None - a valid pipeline constructor is required")
+        model_initializer = configs.constructor_pipeline(
+            model_path=configs.model,
+            pipeline=configs.custom_pipeline,
+            torch_dtype=configs.torch_dtype,
+            components=configs.components
+        )
         model_pipeline = model_initializer.start()
     else: 
         model_initializer = ModelPipelineInitializer(
@@ -363,9 +371,10 @@ def create_app(config=None):
                 "response" : "Opción no disponible porque el servidor esta ejecutando modelos T2Img"
             })
     
-    @app.route(f'/api/diffusers/inference/{configs.api_name}')
+    @app.route(f'/api/diffusers/inference/{configs.api_name}', methods=['POST'])
     def custom_api():
-        if configs.custom_model:
+        if configs.custom_model is True:
+            logging.info(f"API Custom: /api/diffusers/inference/{configs.api_name}")
             data = request.get_json()
             if not data:
                 return jsonify({'error': 'No data provided'}), 400

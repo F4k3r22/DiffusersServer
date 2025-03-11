@@ -13,7 +13,9 @@ def create_inference_server(
     custom_model: bool = False,
     custom_pipeline: Optional[Type] | None = None,
     constructor_pipeline: Optional[Type] | None = None,
-    components: Optional[Dict[str, Any]] = None
+    components: Optional[Dict[str, Any]] = None,
+    api_name: Optional[str] = 'custom_api',
+    torch_dtype = torch.bfloat16
 ):
     """
     Crea y ejecuta un servidor de inferencia de IA completo.
@@ -34,7 +36,9 @@ def create_inference_server(
         custom_model=custom_model,
         custom_pipeline=custom_pipeline,
         constructor_pipeline=constructor_pipeline,
-        components=components
+        components=components,
+        api_name=api_name,
+        torch_dtype=torch_dtype
     )
     
     # Crear la aplicación
