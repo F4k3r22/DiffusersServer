@@ -46,3 +46,5 @@ class SuperPipelinesT2Img:
                 ).to(device=self.device)
         else:
             raise Exception("No CUDA or MPS device available")
+        
+        return self

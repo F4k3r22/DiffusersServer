@@ -138,26 +138,43 @@ def create_app(config=None):
     
     # Inicialización del pipeline de modelo único
     logger.info(f"Inicializando pipeline para el modelo: {app.config['SERVER_CONFIG'].model}")
-    if configs.custom_model:
-        if configs.constructor_pipeline is None:
-            raise ValueError("constructor_pipeline cannot be None - a valid pipeline constructor is required")
-        model_initializer = configs.constructor_pipeline(
-            model_path=configs.model,
-            pipeline=configs.custom_pipeline,
-            torch_dtype=configs.torch_dtype,
-            components=configs.components
-        )
-        model_pipeline = model_initializer.start()
-    else: 
-        model_initializer = ModelPipelineInitializer(
-            model=app.config['SERVER_CONFIG'].model,
-            type_models=app.config['SERVER_CONFIG'].type_models
-        )
-        model_pipeline = model_initializer.initialize_pipeline()
-        model_pipeline.start()  # Iniciamos el pipeline
-    app.config["MODEL_PIPELINE"] = model_pipeline
-    app.config["MODEL_INITIALIZER"] = model_initializer
-    logger.info("Pipeline inicializado y listo para recibir solicitudes")
+    
+    try:
+        if configs.custom_model:
+            if configs.constructor_pipeline is None:
+                raise ValueError("constructor_pipeline cannot be None - a valid pipeline constructor is required")
+            model_initializer = configs.constructor_pipeline(
+                model_path=configs.model,
+                pipeline=configs.custom_pipeline,
+                torch_dtype=configs.torch_dtype,
+                components=configs.components
+            )
+            model_pipeline = model_initializer.start()
+            pipeline = configs.custom_pipeline
+            app.config["CUSTOM_PIPELINE"] = pipeline
+            # Guardamos el pipeline en la configuración de la app
+            app.config["MODEL_PIPELINE"] = model_pipeline
+            app.config["MODEL_INITIALIZER"] = model_initializer
+            
+            
+            # Debug log para verificar que el modelo se ha cargado correctamente
+            logger.info(f"Pipeline personalizado inicializado. Tipo: {type(model_pipeline)}")
+        else: 
+            model_initializer = ModelPipelineInitializer(
+                model=app.config['SERVER_CONFIG'].model,
+                type_models=app.config['SERVER_CONFIG'].type_models
+            )
+            model_pipeline = model_initializer.initialize_pipeline()
+            model_pipeline.start()  # Iniciamos el pipeline
+            
+            # Guardamos el pipeline en la configuración de la app
+            app.config["MODEL_PIPELINE"] = model_pipeline
+            app.config["MODEL_INITIALIZER"] = model_initializer
+            
+        logger.info("Pipeline inicializado y listo para recibir solicitudes")
+    except Exception as e:
+        logger.error(f"Error al inicializar el pipeline: {str(e)}")
+        raise
 
     @app.route('/api/diffusers/inference', methods=['POST'])
     def api():
@@ -373,23 +390,27 @@ def create_app(config=None):
     
     @app.route(f'/api/diffusers/inference/{configs.api_name}', methods=['POST'])
     def custom_api():
-        if configs.custom_model is True:
+        if configs.custom_model:
             logging.info(f"API Custom: /api/diffusers/inference/{configs.api_name}")
             data = request.get_json()
             if not data:
                 return jsonify({'error': 'No data provided'}), 400
 
-            # Recuperamos el pipeline cargado
-            model_pipeline = app.config["MODEL_PIPELINE"]
-            model_initializer = app.config["MODEL_INITIALIZER"]
-        
-            if not model_pipeline or not model_pipeline.pipeline:
-                return jsonify({'error': 'Modelo no inicializado correctamente'}), 500
-
-            # Si se solicita un modelo diferente, ignoramos esa solicitud y usamos el modelo actual
-            requested_model = data.get("model")
-            if requested_model and requested_model != app.config['SERVER_CONFIG'].model:
-                logger.warning(f"Se solicitó el modelo '{requested_model}' pero se utilizará el modelo cargado inicialmente: '{app.config['SERVER_CONFIG'].model}'")
+            # Recuperamos el pipeline cargado y validamos que exista
+            model_pipeline = app.config.get("MODEL_PIPELINE")
+            model_initializer = app.config.get("MODEL_INITIALIZER")
+            pipeline = configs.custom_pipeline
+            
+            logging.info(f"model_pipeline: {model_pipeline}")
+            
+            # Verificación más rigurosa
+            if model_pipeline is None:
+                logger.error("MODEL_PIPELINE es None - El modelo no fue inicializado correctamente")
+                return jsonify({'error': 'Modelo no inicializado correctamente (pipeline es None)'}), 500
+                
+            if not hasattr(model_pipeline, 'pipeline') or model_pipeline.pipeline is None:
+                logger.error("Pipeline no disponible dentro de MODEL_PIPELINE")
+                return jsonify({'error': 'Pipeline no disponible dentro del modelo'}), 500
 
             # Extraemos los parámetros de la solicitud
             prompt = data.get("prompt")
@@ -399,10 +420,22 @@ def create_app(config=None):
             negative_prompt = data.get("negative_prompt", "")
             num_inference_steps = data.get("num_inference_steps", 28)
             num_images = data.get("num_images", 1)
+            
             try:
+                # Aseguramos que configs.custom_pipeline existe
+                if configs.custom_pipeline is None:
+                    return jsonify({'error': 'No se ha definido un custom_pipeline'}), 500
+                    
                 scheduler = model_pipeline.pipeline.scheduler.from_config(model_pipeline.pipeline.scheduler.config)
-
-                pipeline = configs.custom_pipeline.from_pipe(model_pipeline.pipeline, scheduler=scheduler)
+                
+                # Log para detectar problemas específicos
+                logger.info(f"Creando pipeline personalizado del tipo: {pipeline.__name__}")
+                
+                pipeline = pipeline.from_pipe(model_pipeline.pipeline, scheduler=scheduler)
+                
+                # Verificar el device del modelo inicializado
+                
+                
                 # Configuramos el generador
                 generator = torch.Generator(device=model_initializer.device)
                 generator.manual_seed(random.randint(0, 10000000))
@@ -423,7 +456,7 @@ def create_app(config=None):
                     image_url = save_image(output.images[i])
                     image_urls.append(image_url)
                 
-                # Limpieza después de inferencia (solo el pipeline clonado, mantenemos el original)
+                # Limpieza después de inferencia
                 del pipeline
                 del output
                 gc.collect()
@@ -434,10 +467,13 @@ def create_app(config=None):
             
             except Exception as e:
                 logger.error(f"Error en inferencia: {str(e)}")
+                # Mostrar una traza más completa para debugging
+                import traceback
+                logger.error(traceback.format_exc())
                 return jsonify({'error': f'Error en procesamiento: {str(e)}'}), 500
         else:
             return jsonify({
-                "response" : "Opción no disponible porque el servidor esta ejecutando modelos pre configurados"
+                "response": "Opción no disponible porque el servidor está ejecutando modelos pre-configurados"
             })
     
     return app
