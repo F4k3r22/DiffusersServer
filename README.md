@@ -5,54 +5,58 @@
 </div>
 
 <p align="center">
-  🚀 Nueva solución tipo Ollama, pero diseñada específicamente para modelos de generación de imágenes (Text-to-Image).
+  🚀 New Ollama-type solution, but specifically designed for image generation models (Text-to-Image).
+</p>
+
+<p align="center">
+  <i><a href="README_es.md">También disponible en Español</a> | <a href="README.md">Also available in Spanish</a></i>
 </p>
 
 ---
 
-## 🌟 ¿Qué es DiffusersServer?
+## 🌟 What is DiffusersServer?
 
-**DiffusersServer** es un servidor de inferencia basado en Flask y Waitress que permite generar imágenes a partir de texto (*Text-to-Image*) utilizando modelos avanzados de difusión.
+**DiffusersServer** is an inference server based on Flask and Waitress that allows generating images from text (*Text-to-Image*) using advanced diffusion models.
 
-Compatible con **Stable Diffusion 3**, **Stable Diffusion 3.5**, **Flux**, y **Stable Diffusion v1.5**, proporciona una API REST eficiente para integrar generación de imágenes en tus aplicaciones.
+Compatible with **Stable Diffusion 3**, **Stable Diffusion 3.5**, **Flux**, and **Stable Diffusion v1.5**, it provides an efficient REST API to integrate image generation into your applications.
 
-## ⚡ Características principales
+## ⚡ Main features
 
-✅ **Soporte para múltiples modelos**
+✅ **Support for multiple models**
 
 - Stable Diffusion 3 *(Medium)*
 - Stable Diffusion 3.5 *(Large, Large-Turbo, Medium)*
 - Flux *(Flux 1 Schnell, Flux 1 Dev)*
 - Stable Diffusion v1.5
 
-✅ **Compatibilidad con GPU y MPS**
+✅ **GPU and MPS compatibility**
 
-- Aceleración con CUDA (GPUs NVIDIA)
-- Compatibilidad con MPS (Macs con chips M1/M2)
+- Acceleration with CUDA (NVIDIA GPUs)
+- MPS compatibility (Macs with M1/M2 chips)
 
-✅ **Servidor eficiente y escalable**
+✅ **Efficient and scalable server**
 
-- Implementación con Flask + Waitress
-- Soporte para múltiples hilos
-- Carga los modelos en memoria una sola vez
+- Implementation with Flask + Waitress
+- Support for multiple threads
+- Loads models in memory only once
 
-✅ **API REST fácil de usar**
+✅ **Easy-to-use REST API**
 
-- Endpoint para inferencia: `POST /api/diffusers/inference`
-- Parámetros personalizables: prompt, modelo, tamaño de imagen, cantidad de imágenes
+- Inference endpoint: `POST /api/diffusers/inference`
+- Customizable parameters: prompt, model, image size, number of images
 
-✅ **Gestión optimizada de memoria**
+✅ **Optimized memory management**
 
-- *CPU offloading* en modelos Flux para reducir uso de VRAM
-- Monitoreo opcional de consumo de memoria
+- *CPU offloading* in Flux models to reduce VRAM usage
+- Optional memory consumption monitoring
 
 ---
 
-## 🚀 DiffusersServer está diseñado para ofrecer una solución ligera, rápida y flexible para la generación de imágenes a partir de texto.
+## 🚀 DiffusersServer is designed to offer a lightweight, fast, and flexible solution for text-to-image generation.
 
-Si te gusta el proyecto, ¡considera darle una ⭐!
+If you like the project, consider giving it a ⭐!
 
-## 🚀Instalar DiffusersServer
+## 🚀Install DiffusersServer
 
 ```bash
 git clone https://github.com/F4k3r22/DiffusersServer.git
@@ -60,13 +64,13 @@ cd DiffusersServer
 pip install .
 ```
 
-## 🚀Instalar DiffusersServer via Pypi
+## 🚀Install DiffusersServer via Pypi
 
 ```bash
 pip install DiffusersServer
 ```
 
-## 🖥️Iniciar tu servidor
+## 🖥️Start your server
 
 ```python
 from DiffusersServer import DiffusersServerApp
@@ -79,11 +83,11 @@ app = DiffusersServerApp(
 )
 ```
 
-Asi de facil es levantar tu servidor de inferencia local con DiffusersServer en menos de 20 lineas de código
+It's that easy to set up your local inference server with DiffusersServer in less than 20 lines of code
 
-## ⚡Peticiones a tu servidor
+## ⚡Requests to your server
 
-### Generar una imagen
+### Generate an image
 
 ```python
 import requests
@@ -94,40 +98,40 @@ import re
 import urllib.parse
 import platform
 
-# URL del servidor
+# Server URL
 server_url = "http://localhost:8500/api/diffusers/inference"
 base_url = "http://localhost:8500"  
 
-# Datos para enviar
+# Data to send
 data = {
     "prompt": "The T-800 Terminator Robot Returning From The Future, Anime Style",
     "num_inference_steps" : 30,
     "num_images" : 1
 }
 
-# Toma en cuenta que hay un funcionamiento raro con el num_images si es mayor que 1, se va llenando la memoria
-# En proporción de 4.833 GB por imagen (Con stabilityai/stable-diffusion-3.5-medium)
-# Igual se limpia la memoria automaticamente despues de la inferencia para no saturar la memoria excesivamente
+# Keep in mind that there's a strange behavior with num_images if it's greater than 1, the memory keeps filling up
+# In proportion of 4.833 GB per image (With stabilityai/stable-diffusion-3.5-medium)
+# The memory is automatically cleaned after inference to avoid excessive memory saturation
 
-# Es decir SD3.5 memdium usa 19.137GB de VRAM cargado en memoria, y cuando se pide una imagen sube 23.970GB de VRAM
-# Y cuando se termina de generar esta imagen el uso de memoria vuelve al 19.137GB de la carga inicial
+# That is, SD3.5 medium uses 19.137GB of VRAM loaded in memory, and when an image is requested it goes up to 23.970GB of VRAM
+# And when this image is finished generating, the memory usage returns to the initial 19.137GB load
 
-# Realizar la solicitud POST
-print(f"Enviando prompt: \"{data['prompt']}\"")
-print("Generando imagen... (esto puede tomar un tiempo)")
+# Send the POST request
+print(f"Sending prompt: \"{data['prompt']}\"")
+print("Generating image... (this may take some time)")
 response = requests.post(server_url, json=data)
 
-# Verificar la respuesta
+# Check the response
 if response.status_code == 200:
     result = response.json()
     image_url = result['response']
-    print("¡Solicitud exitosa!")
-    print(f"URL de la imagen generada: {image_url}")
+    print("Request successful!")
+    print(f"Generated image URL: {image_url}")
 ```
 
-## Stats del Servidor
+## Server Stats
 
-### Listar modelos disponibles
+### List available models
 
 ```python
 import requests
@@ -143,7 +147,7 @@ def list_models():
 list_models_api = list_models()
 ```
 
-### Obtener el uso de Memoria del Servidor
+### Get Server Memory Usage
 
 ```python
 import requests
@@ -161,32 +165,32 @@ memory_list = get_memory_usage()
 
 ---
 
-## 🚀 Planes a Futuro
+## 🚀 Future Plans
 
-Actualmente estamos trabajando en:
+We are currently working on:
 
-- **Mejorar y optimizar la integración de los modelos Text-to-Image (T2Img) y Text-to-Video (T2V)**
-- **Desarrollar un sistema que permita a los usuarios crear Pipelines personalizados para sus propias API's**
-- **Ampliar las capacidades de personalización según las necesidades específicas de cada proyecto**
+- **Improving and optimizing the integration of Text-to-Image (T2Img) and Text-to-Video (T2V) models**
+- **Developing a system that allows users to create custom Pipelines for their own APIs**
+- **Expanding customization capabilities according to the specific needs of each project**
 
 ---
 
-## Para modelos T2V
+## For T2V models
 
-Para utilizar los modelos T2V, primero debes instalar la versión más reciente de `diffusers` directamente desde el repositorio principal:
+To use T2V models, you must first install the latest version of `diffusers` directly from the main repository:
 
 ```bash
 pip install git+https://github.com/huggingface/diffusers
 ```
 
-### Requisitos minimos para una inferencia óptima
+### Minimum requirements for optimal inference
 
-Para una inferencia óptima, se recomienda:
+For optimal inference, it is recommended:
 
-- **GPU con al menos 48GB de VRAM**
-- **Sistema con 64GB de RAM**
+- **GPU with at least 48GB of VRAM**
+- **System with 64GB of RAM**
 
-### Levantar tu servidor para modelos T2V
+### Start your server for T2V models
 
 ```python
 from DiffusersServer import DiffusersServerApp
@@ -197,9 +201,9 @@ app = DiffusersServerApp(
 )
 ```
 
-### Peticiones
+### Requests
 
-#### Generar un video
+#### Generate a video
 
 ```python
 import requests
@@ -211,14 +215,14 @@ def generate_video(prompt : str):
         "prompt": prompt
     }
 
-    print(f"Petición con el prompt: {prompt}")
+    print(f"Request with prompt: {prompt}")
 
     try:
         response = requests.post(url=url, json=payload)
         result = response.json()
         video_url = result['response']
-        print("¡Solicitud exitosa!")
-        print(f"URL del video generado: {video_url}")
+        print("Request successful!")
+        print(f"Generated video URL: {video_url}")
   
     except Exception as e:
         print(str(e))
@@ -226,55 +230,55 @@ def generate_video(prompt : str):
 generate_video("Police cars chasing a Ferrari in Miami at dusk with gunshots, explosions and lots of chaos and speed, cinematic and action style")
 ```
 
-#### Descargar el video generado
+#### Download the generated video
 
 ```python
 import requests
 import os
 
-def download_video(filename, ruta_destino=None):
+def download_video(filename, destination_path=None):
     """
-    Descarga un video usando la API de Flask.
+    Downloads a video using the Flask API.
   
     Args:
-        filename: Nombre del archivo a descargar
-        ruta_destino: Ruta donde guardar el archivo (opcional)
+        filename: Name of the file to download
+        destination_path: Path where to save the file (optional)
   
     Returns:
-        str: Ruta donde se guardó el archivo
+        str: Path where the file was saved
     """
     base_url = "http://127.0.0.1:8500"
   
-    # Construir URL completa
+    # Build complete URL
     url = f"{base_url}/video/{filename}"
   
-    # Realizar la petición
+    # Make the request
     response = requests.get(url, stream=True)
   
-    # Verificar si la petición fue exitosa
+    # Verify if the request was successful
     if response.status_code == 200:
-        # Determinar ruta de destino
-        if ruta_destino is None:
-            ruta_destino = os.path.join(os.getcwd(), filename)
+        # Determine destination path
+        if destination_path is None:
+            destination_path = os.path.join(os.getcwd(), filename)
       
-        # Guardar el archivo
-        with open(ruta_destino, 'wb') as f:
+        # Save the file
+        with open(destination_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
       
-        print(f"Video descargado y guardado en: {ruta_destino}")
-        return ruta_destino
+        print(f"Video downloaded and saved at: {destination_path}")
+        return destination_path
     else:
-        print(f"Error al descargar el video. Código de estado: {response.status_code}")
+        print(f"Error downloading the video. Status code: {response.status_code}")
         return None
 
 download = download_video("videoff52dbc5.mp4")
 ```
 
-# Donaciones 💸
+# Donations 💸
 
-Si deseas apoyar este proyecto, puedes hacer una donación a través de PayPal:
+If you wish to support this project, you can make a donation through PayPal:
 
 [![Donate with PayPal](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/donate?hosted_button_id=KZZ88H2ME98ZG)
 
-Tu donativo permite mantener y expandir nuestros proyectos de código abierto en beneficio de toda la comunidad.
+Your donation allows us to maintain and expand our open source projects for the benefit of the entire community.
