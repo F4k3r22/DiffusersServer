@@ -166,9 +166,13 @@ def create_app(config=None):
             )
             model_pipeline = model_initializer.initialize_pipeline()
             model_pipeline.start()  # Iniciamos el pipeline
+
+            import threading
+            pipeline_lock = threading.Lock()
             
             # Guardamos el pipeline en la configuración de la app
             app.config["MODEL_PIPELINE"] = model_pipeline
+            app.config["PIPELINE_LOCK"]  = pipeline_lock
             app.config["MODEL_INITIALIZER"] = model_initializer
             
         logger.info("Pipeline inicializado y listo para recibir solicitudes")
@@ -182,73 +186,62 @@ def create_app(config=None):
         if not data:
             return jsonify({'error': 'No data provided'}), 400
 
-        # Recuperamos el pipeline cargado
+        # Recuperamos el pipeline y el lock
         model_pipeline = app.config["MODEL_PIPELINE"]
         model_initializer = app.config["MODEL_INITIALIZER"]
-        
+        pipeline_lock   = app.config["PIPELINE_LOCK"]
+
         if not model_pipeline or not model_pipeline.pipeline:
             return jsonify({'error': 'Modelo no inicializado correctamente'}), 500
 
-        # Si se solicita un modelo diferente, ignoramos esa solicitud y usamos el modelo actual
+        # Ignoramos cambios de modelo en vuelo
         requested_model = data.get("model")
         if requested_model and requested_model != app.config['SERVER_CONFIG'].model:
-            logger.warning(f"Se solicitó el modelo '{requested_model}' pero se utilizará el modelo cargado inicialmente: '{app.config['SERVER_CONFIG'].model}'")
+            logger.warning(
+                f"Se solicitó el modelo '{requested_model}' "
+                f"pero se utilizará '{app.config['SERVER_CONFIG'].model}'"
+            )
 
-        # Extraemos los parámetros de la solicitud
+        # Parámetros de inferencia
         prompt = data.get("prompt")
         if not prompt:
             return jsonify({'error': 'No se proporcionó prompt'}), 400
-        
-        negative_prompt = data.get("negative_prompt", "")
-        num_inference_steps = data.get("num_inference_steps", 28)
-        num_images = data.get("num_images", 1)
-            
+        negative_prompt      = data.get("negative_prompt", "")
+        num_inference_steps  = data.get("num_inference_steps", 28)
+        num_images_per_prompt= data.get("num_images", 1)
+
         try:
-            # Usamos directamente el pipeline cargado, pero clonamos el scheduler para thread-safety
-            scheduler = model_pipeline.pipeline.scheduler.from_config(model_pipeline.pipeline.scheduler.config)
-            
-            # Determinar el tipo de pipeline para clonar correctamente
-            model_type = model_initializer.model_type
-            
-            if model_type in ["SD3", "SD3_5"]:
-                pipeline = StableDiffusion3Pipeline.from_pipe(model_pipeline.pipeline, scheduler=scheduler)
-            elif model_type == "Flux":
-                pipeline = FluxPipeline.from_pipe(model_pipeline.pipeline, scheduler=scheduler)
-            else:
-                pipeline = StableDiffusionPipeline.from_pipe(model_pipeline.pipeline, scheduler=scheduler)
-            
-            # Configuramos el generador
+            # Configuramos el generador (semilla aleatoria)
             generator = torch.Generator(device=model_initializer.device)
-            generator.manual_seed(random.randint(0, 10000000))
-            
-            # Procesamos la inferencia
+            generator.manual_seed(random.randint(0, 10_000_000))
+
             logger.info(f"Procesando prompt: {prompt[:50]}...")
-            output = pipeline(
-                prompt, 
-                negative_prompt=negative_prompt, 
-                generator=generator, 
-                num_inference_steps=num_inference_steps, 
-                num_images_per_prompt=num_images
-            )
-            
-            # Guardamos la imagen y devolvemos la respuesta
+
+            # Inferencia directa bajo lock para thread-safety
+            with pipeline_lock:
+                output = model_pipeline.pipeline(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    generator=generator,
+                    num_inference_steps=num_inference_steps,
+                    num_images_per_prompt=num_images_per_prompt
+                )
+
+            # Guardamos cada imagen y retornamos sus URLs
             image_urls = []
-            for i in range(len(output.images)):
-                image_url = save_image(output.images[i])
-                image_urls.append(image_url)
-                
-            # Limpieza después de inferencia (solo el pipeline clonado, mantenemos el original)
-            del pipeline
-            del output
+            for img in output.images:
+                image_urls.append(save_image(img))
+
+            return jsonify({'response': image_urls})
+
+        except Exception as e:
+            logger.error(f"Error en inferencia: {e}", exc_info=True)
+            # Limpieza aunque haya fallo
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-                
-            return jsonify({'response': image_urls})
-            
-        except Exception as e:
-            logger.error(f"Error en inferencia: {str(e)}")
             return jsonify({'error': f'Error en procesamiento: {str(e)}'}), 500
+
 
     @app.route('/images/<filename>')
     def serve_image(filename):

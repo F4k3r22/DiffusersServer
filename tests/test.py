@@ -17,12 +17,7 @@ data = {
     "num_images" : 1
 }
 
-# Toma en cuenta que hay un funcionamiento raro con el num_images si es mayor que 1, se va llenando la memoria
-# En proporción de 4.833 GB por imagen (Con stabilityai/stable-diffusion-3.5-medium)
-# Igual se limpia la memoria automaticamente despues de la inferencia para no saturar la memoria excesivamente
 
-# Es decir SD3.5 memdium usa 19.137GB de VRAM cargado en memoria, y cuando se pide una imagen sube 23.970GB de VRAM
-# Y cuando se termina de generar esta imagen el uso de memoria vuelve al 19.137GB de la carga inicial
 
 # Crear una carpeta para guardar las imágenes si no existe
 download_folder = "imagenes_generadas"
