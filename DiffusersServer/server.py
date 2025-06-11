@@ -1,8 +1,5 @@
 # server.py
 
-from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import StableDiffusion3Pipeline
-from diffusers.pipelines.flux.pipeline_flux import FluxPipeline
-from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import StableDiffusionPipeline
 from flask import Flask, request, jsonify, send_from_directory, make_response, Response
 from flask_cors import CORS
 from .Pipelines import TextToImagePipelineSD3, TextToImagePipelineFlux, TextToImagePipelineSD

@@ -18,7 +18,9 @@ dependencies = [
     "torch",
     "torchvision",
     "transformers==4.49.0",
-    "sentencepiece"
+    "sentencepiece",
+    "fastapi",
+    "uvicorn"
 ]
 
 [build-system]
