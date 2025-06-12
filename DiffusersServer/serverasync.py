@@ -1,7 +1,7 @@
 # Voy a mudar todo el servidor a un servidor asincrono con FastAPI y Uvicorn
 # Mientras complete esto, el servidor actual sigue funcionando
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse  
+from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import FileResponse  
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from .Pipelines import TextToImagePipelineSD3, TextToImagePipelineFlux, TextToImagePipelineSD
@@ -15,8 +15,9 @@ import tempfile
 from dataclasses import dataclass
 import os
 import torch
+import threading
 import gc
-from typing import Union, Tuple, Optional, Dict, Any, Type
+from typing import Optional, Dict, Any, Type
 from dataclasses import dataclass, field
 from typing import List
 
@@ -27,6 +28,13 @@ class PresetModels:
     Flux: List[str] = field(default_factory=lambda: ['black-forest-labs/FLUX.1-dev', 'black-forest-labs/FLUX.1-schnell'])
     WanT2V: List[str] = field(default_factory=lambda: ['Wan-AI/Wan2.1-T2V-14B-Diffusers', 'Wan-AI/Wan2.1-T2V-1.3B-Diffusers'])
     LTXVideo: List[str] = field(default_factory=lambda: ['Lightricks/LTX-Video'])
+
+class JSONBodyQueryAPI(BaseModel):
+    model : str | None = None
+    prompt : str
+    negative_prompt : str | None = None
+    num_inference_steps : int = 28
+    num_images_per_prompt : int = 1
 
 class ModelPipelineInitializer:
     def __init__(self, model: str = '', type_models: str = 't2im'):
@@ -124,8 +132,10 @@ class ServerConfigModels:
     components: Optional[Dict[str, Any]] = None
     api_name: Optional[str] = 'custom_api'
     torch_dtype: Optional[torch.dtype] = None
+    host: str = '0.0.0.0' 
+    port: int = 8500
 
-def create_app(config=None):
+def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
     app = FastAPI()
 
     # Configuración del logger
@@ -133,12 +143,144 @@ def create_app(config=None):
     global logger
     logger = logging.getLogger(__name__)
 
-    if config is None:
-        config = ServerConfigModels()
+    server_config = config or ServerConfigModels()
+    app.state.SERVER_CONFIG = server_config
+
+    global utils_app
+
+    utils_app = Utils(host=server_config.host, port=server_config.port)
+
+    logger.info(f"Inicializando pipeline para el modelo: {server_config.model}")
+    try:
+        if server_config.custom_model:
+            if server_config.constructor_pipeline is None:
+                raise ValueError("constructor_pipeline cannot be None - a valid pipeline constructor is required")
+            initializer = server_config.constructor_pipeline(
+                model_path=server_config.model,
+                pipeline=server_config.custom_pipeline,
+                torch_dtype=server_config.torch_dtype,
+                components=server_config.components,
+            )
+            model_pipeline = initializer.start()
+            app.state.CUSTOM_PIPELINE = server_config.custom_pipeline
+            app.state.MODEL_PIPELINE = model_pipeline
+            app.state.MODEL_INITIALIZER = initializer
+            logger.info(f"Pipeline personalizado inicializado. Tipo: {type(model_pipeline)}")
+        else:
+            initializer = ModelPipelineInitializer(
+                model=server_config.model,
+                type_models=server_config.type_models,
+            )
+            model_pipeline = initializer.initialize_pipeline()
+            model_pipeline.start()
+
+            # Lock para concurrencia
+            pipeline_lock = threading.Lock()
+
+            app.state.MODEL_PIPELINE = model_pipeline
+            app.state.PIPELINE_LOCK = pipeline_lock
+            app.state.MODEL_INITIALIZER = initializer
+
+        logger.info("Pipeline inicializado y listo para recibir solicitudes")
+    except Exception as e:
+        logger.error(f"Error al inicializar el pipeline: {e}")
+        raise
+
 
     @app.get("/")
     async def root():
         return {"message": "Welcome to the Diffusers Server"}
+
+    @app.post("/api/diffusers/inference")
+    async def api(json : JSONBodyQueryAPI):
+        model = json.model
+        prompt = json.prompt
+        negative_prompt = json.negative_prompt
+        num_inference_steps = json.num_inference_steps
+        num_images_per_prompt = json.num_images_per_prompt
+
+        model_pipeline = app.state.MODEL_PIPELINE 
+        pipeline_lock = app.state.PIPELINE_LOCK 
+        initializer = app.state.MODEL_INITIALIZER
+
+        if not model_pipeline or not model_pipeline.pipeline:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Modelo no inicializado correctamente')
+
+        if model and model != server_config.model:
+            logger.warning(
+                f"Se solicitó el modelo '{model}' "
+                f"pero se utilizará '{server_config.model}'"
+            )
+
+        if prompt == None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='No se proporcionó prompt')
+
+        try:
+            generator = torch.Generator(device=initializer.device)
+            generator.manual_seed(random.randint(0, 10_000_000))
+
+            logger.info(f"Procesando prompt: {prompt[:50]}...")
+
+            with pipeline_lock:
+                output = model_pipeline.pipeline(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    generator=generator,
+                    num_inference_steps=num_inference_steps,
+                    num_images_per_prompt=num_images_per_prompt
+                )
+
+            image_urls = []
+            for img in output.images:
+                image_urls.append(utils_app.save_image(img))
+
+            return {'response' : image_urls}
+
+        except HTTPException as e:
+            logger.error(f"Error en inferencia: {e}", exc_info=True)
+            return {'error': f'Error en procesamiento: {str(e)}'}
+        finally:
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+    @app.get("/images/{filename}")
+    async def serve_image(filename):
+        return FileResponse(path=utils_app.image_dir, filename=filename)
+
+    @app.get("/api/models")
+    async def list_models():
+        return {
+            "current_model" : server_config.model,
+            "type" : server_config.type_models,
+            "all_models": {
+                "type": "T2Img",
+                "SD3": PresetModels().SD3,
+                "SD3_5": PresetModels().SD3_5,
+                "Flux": PresetModels().Flux,
+                "type": "T2V",
+                "WanT2V": PresetModels().WanT2V,
+                "LTX-Video": PresetModels().LTXVideo,
+            }
+        }
+
+    @app.get("/api/status")
+    async def get_status():
+        memory_info = {}
+        if torch.cuda.is_available():
+            memory_allocated = torch.cuda.memory_allocated() / 1024**3  # GB
+            memory_reserved = torch.cuda.memory_reserved() / 1024**3    # GB
+            memory_info = {
+                "memory_allocated_gb": round(memory_allocated, 2),
+                "memory_reserved_gb": round(memory_reserved, 2),
+                "device": torch.cuda.get_device_name(0)
+            }
+
+        return {
+            "current_model" : server_config.model,
+            "type_models" : server_config.type_models,
+            "memory" : memory_info}
+        
 
     # Configuración de CORS. Lo hago aqui porque en Apps anteriores tuve errores al iniciar el servidor
     app.add_middleware(
