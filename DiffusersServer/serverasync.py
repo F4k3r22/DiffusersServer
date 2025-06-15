@@ -3,6 +3,7 @@
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import FileResponse  
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from .Pipelines import TextToImagePipelineSD3, TextToImagePipelineFlux, TextToImagePipelineSD
 import logging
@@ -192,57 +193,60 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
         return {"message": "Welcome to the Diffusers Server"}
 
     @app.post("/api/diffusers/inference")
-    async def api(json : JSONBodyQueryAPI):
-        model = json.model
-        prompt = json.prompt
-        negative_prompt = json.negative_prompt
-        num_inference_steps = json.num_inference_steps
+    async def api(json: JSONBodyQueryAPI):
+        prompt                = json.prompt
+        negative_prompt       = json.negative_prompt or ""
+        num_steps             = json.num_inference_steps
         num_images_per_prompt = json.num_images_per_prompt
 
-        model_pipeline = app.state.MODEL_PIPELINE 
-        pipeline_lock = app.state.PIPELINE_LOCK 
+        wrapper     = app.state.MODEL_PIPELINE      # tu TextToImagePipelineSD3
         initializer = app.state.MODEL_INITIALIZER
 
-        if not model_pipeline or not model_pipeline.pipeline:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Modelo no inicializado correctamente')
 
-        if model and model != server_config.model:
-            logger.warning(
-                f"Se solicitó el modelo '{model}' "
-                f"pero se utilizará '{server_config.model}'"
+        if not wrapper or not wrapper.pipeline:
+            raise HTTPException(500, "Modelo no inicializado correctamente")
+        if not prompt.strip():
+            raise HTTPException(400, "No se proporcionó prompt")
+
+        base_pipe = wrapper.pipeline  # la StableDiffusion3Pipeline real
+
+        # Preparamos el generador
+        def make_generator():
+            g = torch.Generator(device=initializer.device)
+            return g.manual_seed(random.randint(0, 10_000_000))
+        gen = make_generator()
+
+        # Definimos la función bloqueante
+        def infer():
+            # 1) Creamos un scheduler “fresco” aquí
+            scheduler = base_pipe.scheduler.from_config(base_pipe.scheduler.config)
+            base_pipe.scheduler = scheduler
+
+            # 2) Ejecutamos la inferencia
+            return base_pipe(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                generator=gen,
+                num_inference_steps=num_steps,
+                num_images_per_prompt=num_images_per_prompt
             )
 
-        if prompt == None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='No se proporcionó prompt')
-
         try:
-            generator = torch.Generator(device=initializer.device)
-            generator.manual_seed(random.randint(0, 10_000_000))
+            # Lo corremos en un thread distinto
+            output = await run_in_threadpool(infer)
 
-            logger.info(f"Procesando prompt: {prompt[:50]}...")
+            # Guardamos imágenes
+            urls = [utils_app.save_image(img) for img in output.images]
+            return {"response": urls}
 
-            with pipeline_lock:
-                output = model_pipeline.pipeline(
-                    prompt=prompt,
-                    negative_prompt=negative_prompt,
-                    generator=generator,
-                    num_inference_steps=num_inference_steps,
-                    num_images_per_prompt=num_images_per_prompt
-                )
+        except Exception as e:
+            raise HTTPException(500, f"Error en procesamiento: {e}")
 
-            image_urls = []
-            for img in output.images:
-                image_urls.append(utils_app.save_image(img))
-
-            return {'response' : image_urls}
-
-        except HTTPException as e:
-            logger.error(f"Error en inferencia: {e}", exc_info=True)
-            return {'error': f'Error en procesamiento: {str(e)}'}
         finally:
-            gc.collect()
+            import gc; gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+
 
     @app.get("/images/{filename}")
     async def serve_image(filename):
