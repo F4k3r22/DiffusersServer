@@ -14,13 +14,13 @@ dependencies = [
     "flask_cors",
     "waitress",
     "psutil",
-    "diffusers",
     "torch",
     "torchvision",
     "transformers==4.49.0",
     "sentencepiece",
     "fastapi",
-    "uvicorn"
+    "uvicorn",
+    "diffusers @ git+https://github.com/F4k3r22/diffusers-async.git@main"
 ]
 
 [build-system]

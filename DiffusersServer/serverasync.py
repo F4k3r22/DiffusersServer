@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from .Pipelines import TextToImagePipelineSD3, TextToImagePipelineFlux, TextToImagePipelineSD
 import logging
 from diffusers.utils.export_utils import export_to_video
+from diffusers.pipelines.pipeline_utils import RequestScopedPipeline
 from diffusers import *
 from .superpipeline import *
 import random
@@ -175,6 +176,8 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
             model_pipeline = initializer.initialize_pipeline()
             model_pipeline.start()
 
+            app.state.REQUEST_PIPE = RequestScopedPipeline(model_pipeline.pipeline)
+
             # Lock para concurrencia
             pipeline_lock = threading.Lock()
 
@@ -216,26 +219,23 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
             return g.manual_seed(random.randint(0, 10_000_000))
         gen = make_generator()
 
-        # Definimos la función bloqueante
-        def infer():
-            # 1) Creamos un scheduler “fresco” aquí
-            scheduler = base_pipe.scheduler.from_config(base_pipe.scheduler.config)
-            base_pipe.scheduler = scheduler
+        req_pipe = app.state.REQUEST_PIPE
 
-            # 2) Ejecutamos la inferencia
-            return base_pipe(
+        def infer():
+            gen = make_generator()
+            # RequestScopedPipeline.generate usará clone_for_request o deepcopy internamente
+            return req_pipe.generate(
                 prompt=prompt,
                 negative_prompt=negative_prompt,
                 generator=gen,
                 num_inference_steps=num_steps,
-                num_images_per_prompt=num_images_per_prompt
+                num_images_per_prompt=num_images_per_prompt,
+                device=initializer.device
             )
 
         try:
-            # Lo corremos en un thread distinto
             output = await run_in_threadpool(infer)
 
-            # Guardamos imágenes
             urls = [utils_app.save_image(img) for img in output.images]
             return {"response": urls}
 
