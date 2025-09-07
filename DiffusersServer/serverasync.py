@@ -28,15 +28,6 @@ class PresetModels:
     SD3: List[str] = field(default_factory=lambda: ['stabilityai/stable-diffusion-3-medium'])
     SD3_5: List[str] = field(default_factory=lambda: ['stabilityai/stable-diffusion-3.5-large', 'stabilityai/stable-diffusion-3.5-large-turbo', 'stabilityai/stable-diffusion-3.5-medium'])
     Flux: List[str] = field(default_factory=lambda: ['black-forest-labs/FLUX.1-dev', 'black-forest-labs/FLUX.1-schnell'])
-    WanT2V: List[str] = field(default_factory=lambda: ['Wan-AI/Wan2.1-T2V-14B-Diffusers', 'Wan-AI/Wan2.1-T2V-1.3B-Diffusers'])
-    LTXVideo: List[str] = field(default_factory=lambda: ['Lightricks/LTX-Video'])
-
-class JSONBodyQueryAPI(BaseModel):
-    model : str | None = None
-    prompt : str
-    negative_prompt : str | None = None
-    num_inference_steps : int = 28
-    num_images_per_prompt : int = 1
 
 class ModelPipelineInitializer:
     def __init__(self, model: str = '', type_models: str = 't2im'):
@@ -60,10 +51,6 @@ class ModelPipelineInitializer:
             self.model_type = "SD3_5"
         elif self.model in preset_models.Flux:
             self.model_type = "Flux"
-        elif self.model in preset_models.WanT2V:
-            self.model_type = "WanT2V"
-        elif self.model in preset_models.LTXVideo:
-            self.model_type = "LTXVideo"
         else:
             self.model_type = "SD"
 
@@ -78,23 +65,6 @@ class ModelPipelineInitializer:
             else:
                 raise ValueError(f"Model type {self.model_type} not supported for text-to-image")
         elif self.type_models == 't2v':
-            if self.model_type == "WanT2V":
-                try: 
-                    from .VideoPipelines import WanT2VPipelines
-                    self.pipeline = WanT2VPipelines(self.model)
-                except ImportError as e:
-                    print('No se pudo importar correctamente, verifica tu versión de diffusers')
-                    pass
-            if self.model_type == "LTXVideo":
-                try:
-                    from .VideoPipelines import LTXT2VPipelines
-                    self.pipeline = LTXT2VPipelines(self.model)
-                except ImportError as e:
-                    print('No se pudo importar correctamente, verifica tu versión de diffusers')
-                    pass
-            else:
-                pass
-        else:
             raise ValueError(f"Unsupported type_models: {self.type_models}")
 
         return self.pipeline
@@ -128,7 +98,6 @@ class Utils:
 
         image.save(image_path, format="PNG", optimize=True)
 
-        # Liberar memoria intermedia
         del image
         gc.collect()
         if torch.cuda.is_available():
@@ -158,6 +127,13 @@ class ServerConfigModels:
 
 def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
     app = FastAPI()
+
+    class JSONBodyQueryAPI(BaseModel):
+        model : str | None = None
+        prompt : str
+        negative_prompt : str | None = None
+        num_inference_steps : int = 28
+        num_images_per_prompt : int = 1
 
     # Configuración del logger
     logging.basicConfig(level=logging.INFO)
@@ -284,9 +260,6 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
                 "SD3": PresetModels().SD3,
                 "SD3_5": PresetModels().SD3_5,
                 "Flux": PresetModels().Flux,
-                "type": "T2V",
-                "WanT2V": PresetModels().WanT2V,
-                "LTX-Video": PresetModels().LTXVideo,
             }
         }
 
