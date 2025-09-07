@@ -111,10 +111,29 @@ class Utils:
             os.makedirs(self.video_dir)
 
     def save_image(self, image):
-        filename = "draw" + str(uuid.uuid4()).split("-")[0] + ".png"
+        if hasattr(image, "to"):
+            try:
+                image = image.to("cpu")
+            except Exception:
+                pass
+
+        if isinstance(image, torch.Tensor):
+            from torchvision import transforms
+            to_pil = transforms.ToPILImage()
+            image = to_pil(image.squeeze(0).clamp(0, 1))
+
+        filename = "img" + str(uuid.uuid4()).split("-")[0] + ".png"
         image_path = os.path.join(self.image_dir, filename)
         logger.info(f"Saving image to {image_path}")
-        image.save(image_path)
+
+        image.save(image_path, format="PNG", optimize=True)
+
+        # Liberar memoria intermedia
+        del image
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         return os.path.join(self.service_url, "images", filename)
 
     def save_video(self, video, fps):
@@ -223,7 +242,6 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
 
         def infer():
             gen = make_generator()
-            # RequestScopedPipeline.generate usará clone_for_request o deepcopy internamente
             return req_pipe.generate(
                 prompt=prompt,
                 negative_prompt=negative_prompt,
@@ -240,6 +258,7 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
             return {"response": urls}
 
         except Exception as e:
+            logger.error(f"Error durante la inferencia: {e}")
             raise HTTPException(500, f"Error en procesamiento: {e}")
 
         finally:
@@ -249,8 +268,11 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
 
 
     @app.get("/images/{filename}")
-    async def serve_image(filename):
-        return FileResponse(path=utils_app.image_dir, filename=filename)
+    async def serve_image(filename: str):
+        file_path = os.path.join(utils_app.image_dir, filename)
+        if not os.path.isfile(file_path):
+            raise HTTPException(status_code=404, detail="Image not found")
+        return FileResponse(file_path, media_type="image/png")
 
     @app.get("/api/models")
     async def list_models():
