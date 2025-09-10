@@ -151,6 +151,14 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
         app.state.metrics_lock = asyncio.Lock()
         app.state.metrics_task = None
 
+        # Guardar modelo ya inicializado
+
+        # Inicializar utils
+        app.state.utils_app = Utils(
+            host=server_config.host,
+            port=server_config.port,
+        )
+
         async def metrics_loop():
             try:
                 while True:
@@ -165,62 +173,10 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
 
         app.state.metrics_task = asyncio.create_task(metrics_loop())
 
-        def _sync_init_models_and_utils():
-            utils = Utils(host=server_config.host, port=server_config.port)
-
-            if server_config.custom_model:
-                if server_config.constructor_pipeline is None:
-                    raise ValueError("constructor_pipeline cannot be None - a valid pipeline constructor is required")
-                initializer = server_config.constructor_pipeline(
-                    model_path=server_config.model,
-                    pipeline=server_config.custom_pipeline,
-                    torch_dtype=server_config.torch_dtype,
-                    components=server_config.components,
-                )
-                model_pipeline = initializer.start()
-                return utils, initializer, model_pipeline, None
-            else:
-                initializer = ModelPipelineInitializer(
-                    model=server_config.model,
-                    type_models=server_config.type_models,
-                )
-                model_pipeline = initializer.initialize_pipeline()
-                try:
-                    model_pipeline.start()
-                except Exception:
-                    pass
-
-                request_pipe = RequestScopedPipeline(model_pipeline.pipeline)
-                pipeline_lock = threading.Lock()
-
-                return utils, initializer, model_pipeline, (request_pipe, pipeline_lock)
-
-        try:
-            utils_obj, initializer_obj, model_pipeline_obj, extra = await run_in_threadpool(_sync_init_models_and_utils)
-
-            app.state.utils_app = utils_obj
-            app.state.MODEL_INITIALIZER = initializer_obj
-            app.state.MODEL_PIPELINE = model_pipeline_obj
-
-            if extra is not None:
-                request_pipe_obj, pipeline_lock = extra
-                app.state.REQUEST_PIPE = request_pipe_obj
-                app.state.PIPELINE_LOCK = pipeline_lock
-            else:
-                app.state.REQUEST_PIPE = None
-                app.state.PIPELINE_LOCK = threading.Lock()
-
-            app.state.logger.info(f"Pipeline inicializado y listo para recibir solicitudes (modelo={server_config.model})")
-
-        except Exception as e:
-            app.state.logger.error(f"Error al inicializar modelos/ utils en lifespan: {e}")
-            # lanzar para detener arranque y ver error de inmediato
-            raise
-
         try:
             yield
         finally:
-            # Shutdown: cancelar metrics task y limpieza
+            # 🔻 shutdown
             task = app.state.metrics_task
             if task:
                 task.cancel()
@@ -229,20 +185,53 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
                 except asyncio.CancelledError:
                     pass
 
-            # Si tu pipeline tiene método de shutdown/cleanup, llámalo acá (opcional)
+            # Intentar liberar pipeline si tiene stop/close
             try:
-                # ejemplo genérico: si MODEL_PIPELINE tiene .stop() o .close()
-                mp = getattr(app.state, "MODEL_PIPELINE", None)
-                if mp is not None:
-                    stop_fn = getattr(mp, "stop", None) or getattr(mp, "close", None)
-                    if callable(stop_fn):
-                        await run_in_threadpool(stop_fn)
+                stop_fn = getattr(model_pipeline, "stop", None) or getattr(model_pipeline, "close", None)
+                if callable(stop_fn):
+                    await run_in_threadpool(stop_fn)
             except Exception as e:
                 app.state.logger.warning(f"Error during pipeline shutdown: {e}")
 
             app.state.logger.info("Lifespan shutdown complete")
 
+    
+
     app = FastAPI(lifespan=lifespan)
+
+    logger = logging.getLogger("DiffusersServer.Pipelines")
+
+    if server_config.custom_model:
+        if server_config.constructor_pipeline is None:
+            raise ValueError("constructor_pipeline cannot be None - a valid pipeline constructor is required")
+
+        initializer = server_config.constructor_pipeline(
+            model_path=server_config.model,
+            pipeline=server_config.custom_pipeline,
+            torch_dtype=server_config.torch_dtype,
+            components=server_config.components,
+        )
+        model_pipeline = initializer.start()
+        request_pipe = None
+        pipeline_lock = threading.Lock()
+
+    else:
+        initializer = ModelPipelineInitializer(
+            model=server_config.model,
+            type_models=server_config.type_models,
+        )
+        model_pipeline = initializer.initialize_pipeline()
+        model_pipeline.start()
+
+        request_pipe = RequestScopedPipeline(model_pipeline.pipeline)
+        pipeline_lock = threading.Lock()
+
+    logger.info(f"Pipeline inicializado y listo para recibir solicitudes (modelo={server_config.model})")
+
+    app.state.MODEL_INITIALIZER = initializer
+    app.state.MODEL_PIPELINE = model_pipeline
+    app.state.REQUEST_PIPE = request_pipe
+    app.state.PIPELINE_LOCK = pipeline_lock
 
     class JSONBodyQueryAPI(BaseModel):
         model : str | None = None
@@ -298,16 +287,21 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
                 device=initializer.device
             )
 
-        async with app.state.metrics_lock:
-            app.state.active_inferences += 1
-
         try:
+            async with app.state.metrics_lock:
+                app.state.active_inferences += 1
+
             output = await run_in_threadpool(infer)
+
+            async with app.state.metrics_lock:
+                app.state.active_inferences = max(0, app.state.active_inferences - 1)
 
             urls = [utils_app.save_image(img) for img in output.images]
             return {"response": urls}
 
         except Exception as e:
+            async with app.state.metrics_lock:
+                app.state.active_inferences = max(0, app.state.active_inferences - 1)
             logger.error(f"Error durante la inferencia: {e}")
             raise HTTPException(500, f"Error en procesamiento: {e}")
 

@@ -33,7 +33,6 @@ class TextToImagePipelineSD3:
         en función del dispositivo disponible si no se definió previamente.
         """
         if torch.cuda.is_available():
-            # Si no se definió model_path, se asigna el valor por defecto para CUDA.
             model_path = self.model_path or "stabilityai/stable-diffusion-3.5-large"
             logger.info("Loading CUDA")
             self.device = "cuda"
