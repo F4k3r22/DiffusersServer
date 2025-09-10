@@ -1,6 +1,6 @@
 # Voy a mudar todo el servidor a un servidor asincrono con FastAPI y Uvicorn
 # Mientras complete esto, el servidor actual sigue funcionando
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse  
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
@@ -22,6 +22,18 @@ import gc
 from typing import Optional, Dict, Any, Type
 from dataclasses import dataclass, field
 from typing import List
+from contextlib import asynccontextmanager
+import asyncio
+
+"""
+The goal is to create image generation, editing, and variance endpoints compatible with the OpenAI client.
+
+APIs:
+
+POST /images/variations (create_variation)
+POST /images/edits (edit)
+POST /images/generations (generate)
+"""
 
 @dataclass
 class PresetModels:
@@ -126,7 +138,111 @@ class ServerConfigModels:
     port: int = 8500
 
 def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
-    app = FastAPI()
+
+    server_config = config or ServerConfigModels()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        logging.basicConfig(level=logging.INFO)
+        app.state.logger = logging.getLogger("diffusers-server")
+
+        app.state.total_requests = 0
+        app.state.active_inferences = 0
+        app.state.metrics_lock = asyncio.Lock()
+        app.state.metrics_task = None
+
+        async def metrics_loop():
+            try:
+                while True:
+                    async with app.state.metrics_lock:
+                        total = app.state.total_requests
+                        active = app.state.active_inferences
+                    app.state.logger.info(f"[METRICS] total_requests={total} active_inferences={active}")
+                    await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                app.state.logger.info("Metrics loop cancelled")
+                raise
+
+        app.state.metrics_task = asyncio.create_task(metrics_loop())
+
+        def _sync_init_models_and_utils():
+            utils = Utils(host=server_config.host, port=server_config.port)
+
+            if server_config.custom_model:
+                if server_config.constructor_pipeline is None:
+                    raise ValueError("constructor_pipeline cannot be None - a valid pipeline constructor is required")
+                initializer = server_config.constructor_pipeline(
+                    model_path=server_config.model,
+                    pipeline=server_config.custom_pipeline,
+                    torch_dtype=server_config.torch_dtype,
+                    components=server_config.components,
+                )
+                model_pipeline = initializer.start()
+                return utils, initializer, model_pipeline, None
+            else:
+                initializer = ModelPipelineInitializer(
+                    model=server_config.model,
+                    type_models=server_config.type_models,
+                )
+                model_pipeline = initializer.initialize_pipeline()
+                try:
+                    model_pipeline.start()
+                except Exception:
+                    pass
+
+                request_pipe = RequestScopedPipeline(model_pipeline.pipeline)
+                pipeline_lock = threading.Lock()
+
+                return utils, initializer, model_pipeline, (request_pipe, pipeline_lock)
+
+        try:
+            utils_obj, initializer_obj, model_pipeline_obj, extra = await run_in_threadpool(_sync_init_models_and_utils)
+
+            app.state.utils_app = utils_obj
+            app.state.MODEL_INITIALIZER = initializer_obj
+            app.state.MODEL_PIPELINE = model_pipeline_obj
+
+            if extra is not None:
+                request_pipe_obj, pipeline_lock = extra
+                app.state.REQUEST_PIPE = request_pipe_obj
+                app.state.PIPELINE_LOCK = pipeline_lock
+            else:
+                app.state.REQUEST_PIPE = None
+                app.state.PIPELINE_LOCK = threading.Lock()
+
+            app.state.logger.info(f"Pipeline inicializado y listo para recibir solicitudes (modelo={server_config.model})")
+
+        except Exception as e:
+            app.state.logger.error(f"Error al inicializar modelos/ utils en lifespan: {e}")
+            # lanzar para detener arranque y ver error de inmediato
+            raise
+
+        try:
+            yield
+        finally:
+            # Shutdown: cancelar metrics task y limpieza
+            task = app.state.metrics_task
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+            # Si tu pipeline tiene método de shutdown/cleanup, llámalo acá (opcional)
+            try:
+                # ejemplo genérico: si MODEL_PIPELINE tiene .stop() o .close()
+                mp = getattr(app.state, "MODEL_PIPELINE", None)
+                if mp is not None:
+                    stop_fn = getattr(mp, "stop", None) or getattr(mp, "close", None)
+                    if callable(stop_fn):
+                        await run_in_threadpool(stop_fn)
+            except Exception as e:
+                app.state.logger.warning(f"Error during pipeline shutdown: {e}")
+
+            app.state.logger.info("Lifespan shutdown complete")
+
+    app = FastAPI(lifespan=lifespan)
 
     class JSONBodyQueryAPI(BaseModel):
         model : str | None = None
@@ -135,55 +251,12 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
         num_inference_steps : int = 28
         num_images_per_prompt : int = 1
 
-    # Configuración del logger
-    logging.basicConfig(level=logging.INFO)
-    global logger
-    logger = logging.getLogger(__name__)
-
-    server_config = config or ServerConfigModels()
-    app.state.SERVER_CONFIG = server_config
-
-    global utils_app
-
-    utils_app = Utils(host=server_config.host, port=server_config.port)
-
-    logger.info(f"Inicializando pipeline para el modelo: {server_config.model}")
-    try:
-        if server_config.custom_model:
-            if server_config.constructor_pipeline is None:
-                raise ValueError("constructor_pipeline cannot be None - a valid pipeline constructor is required")
-            initializer = server_config.constructor_pipeline(
-                model_path=server_config.model,
-                pipeline=server_config.custom_pipeline,
-                torch_dtype=server_config.torch_dtype,
-                components=server_config.components,
-            )
-            model_pipeline = initializer.start()
-            app.state.CUSTOM_PIPELINE = server_config.custom_pipeline
-            app.state.MODEL_PIPELINE = model_pipeline
-            app.state.MODEL_INITIALIZER = initializer
-            logger.info(f"Pipeline personalizado inicializado. Tipo: {type(model_pipeline)}")
-        else:
-            initializer = ModelPipelineInitializer(
-                model=server_config.model,
-                type_models=server_config.type_models,
-            )
-            model_pipeline = initializer.initialize_pipeline()
-            model_pipeline.start()
-
-            app.state.REQUEST_PIPE = RequestScopedPipeline(model_pipeline.pipeline)
-
-            # Lock para concurrencia
-            pipeline_lock = threading.Lock()
-
-            app.state.MODEL_PIPELINE = model_pipeline
-            app.state.PIPELINE_LOCK = pipeline_lock
-            app.state.MODEL_INITIALIZER = initializer
-
-        logger.info("Pipeline inicializado y listo para recibir solicitudes")
-    except Exception as e:
-        logger.error(f"Error al inicializar el pipeline: {e}")
-        raise
+    @app.middleware("http")
+    async def count_requests_middleware(request: Request, call_next):
+        async with app.state.metrics_lock:
+            app.state.total_requests += 1
+        response = await call_next(request)
+        return response
 
 
     @app.get("/")
@@ -197,8 +270,10 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
         num_steps             = json.num_inference_steps
         num_images_per_prompt = json.num_images_per_prompt
 
-        wrapper     = app.state.MODEL_PIPELINE      # tu TextToImagePipelineSD3
+        wrapper     = app.state.MODEL_PIPELINE   
         initializer = app.state.MODEL_INITIALIZER
+
+        utils_app = app.state.utils_app
 
 
         if not wrapper or not wrapper.pipeline:
@@ -206,13 +281,9 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
         if not prompt.strip():
             raise HTTPException(400, "No se proporcionó prompt")
 
-        base_pipe = wrapper.pipeline  # la StableDiffusion3Pipeline real
-
-        # Preparamos el generador
         def make_generator():
             g = torch.Generator(device=initializer.device)
             return g.manual_seed(random.randint(0, 10_000_000))
-        gen = make_generator()
 
         req_pipe = app.state.REQUEST_PIPE
 
@@ -226,6 +297,9 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
                 num_images_per_prompt=num_images_per_prompt,
                 device=initializer.device
             )
+
+        async with app.state.metrics_lock:
+            app.state.active_inferences += 1
 
         try:
             output = await run_in_threadpool(infer)
@@ -245,6 +319,7 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
 
     @app.get("/images/{filename}")
     async def serve_image(filename: str):
+        utils_app = app.state.utils_app
         file_path = os.path.join(utils_app.image_dir, filename)
         if not os.path.isfile(file_path):
             raise HTTPException(status_code=404, detail="Image not found")
@@ -281,7 +356,6 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
             "memory" : memory_info}
         
 
-    # Configuración de CORS. Lo hago aqui porque en Apps anteriores tuve errores al iniciar el servidor
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"], 
