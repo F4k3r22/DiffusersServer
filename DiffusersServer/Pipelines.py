@@ -86,7 +86,7 @@ class TextToImagePipelineSD3:
                             self.pipeline.transformer,
                             mode="reduce-overhead",
                             fullgraph=False, 
-                            dynamic=False,
+                            dynamic=True,
                         )
                         logger.info("Transformer compiled with torch.compile")
                     
