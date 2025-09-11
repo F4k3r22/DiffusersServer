@@ -20,7 +20,8 @@ dependencies = [
     "sentencepiece",
     "fastapi",
     "uvicorn",
-    "diffusers @ git+https://github.com/F4k3r22/diffusers-async.git@main"
+    "diffusers @ git+https://github.com/F4k3r22/diffusers-async.git@main",
+    "ftfy"
 ]
 
 [build-system]
