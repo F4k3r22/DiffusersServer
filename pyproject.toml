@@ -21,7 +21,10 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "diffusers @ git+https://github.com/F4k3r22/diffusers-async.git@main",
-    "ftfy"
+    "ftfy",
+    "accelerate",
+    "xformers",
+    "protobuf"
 ]
 
 [build-system]
