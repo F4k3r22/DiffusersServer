@@ -214,6 +214,8 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
             port=server_config.port,
         )
 
+        app.state.vae_lock = VAELock()
+
         async def metrics_loop():
             try:
                 while True:
@@ -322,8 +324,6 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
         if not prompt.strip():
             raise HTTPException(400, "No prompt provided")
 
-        if not hasattr(app.state, 'vae_lock'):
-            app.state.vae_lock = VAELock()
 
         def make_generator():
             g = torch.Generator(device=initializer.device)
