@@ -8,6 +8,7 @@ import os
 import logging
 from pydantic import BaseModel
 import gc
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -225,3 +226,27 @@ class TextToImagePipelineSD:
             ).to(device=self.device)
         else:
             raise Exception("No CUDA or MPS device available")
+
+class VAELock:
+    def __init__(self):
+        self.lock = asyncio.Lock()
+        self.active_decodes = 0
+    
+    async def __aenter__(self):
+        await self.lock.acquire()
+        self.active_decodes += 1
+        logger.info(f"VAE decode started (active: {self.active_decodes})")
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        self.active_decodes -= 1
+        logger.info(f"VAE decode finished (active: {self.active_decodes})")
+        
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+        gc.collect()
+        
+        await asyncio.sleep(0.1)
+        
+        self.lock.release()

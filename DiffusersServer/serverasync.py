@@ -3,7 +3,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
-from .Pipelines import TextToImagePipelineSD3, TextToImagePipelineFlux, TextToImagePipelineSD
+from .Pipelines import TextToImagePipelineSD3, TextToImagePipelineFlux, TextToImagePipelineSD, VAELock
 import logging
 from diffusers.utils.export_utils import export_to_video
 from diffusers.pipelines.pipeline_utils import RequestScopedPipeline
@@ -322,6 +322,9 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
         if not prompt.strip():
             raise HTTPException(400, "No prompt provided")
 
+        if not hasattr(app.state, 'vae_lock'):
+            app.state.vae_lock = VAELock()
+
         def make_generator():
             g = torch.Generator(device=initializer.device)
             return g.manual_seed(random.randint(0, 10_000_000))
@@ -351,23 +354,24 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
             images = getattr(output, "images", []) or []
             
             saved_urls = []
-            
-            for i, img in enumerate(images):
-                try:
 
-                    url = await utils_app.save_image(img)
-                    saved_urls.append(url)
+            async with app.state.vae_lock:
+                for i, img in enumerate(images):
+                    try:
+
+                        url = await utils_app.save_image(img)
+                        saved_urls.append(url)
                     
-                    if isinstance(img, Image.Image):
-                        img.close()
-                    del img
+                        if isinstance(img, Image.Image):
+                            img.close()
+                        del img
                     
-                    if torch.cuda.is_available():
-                        torch.cuda.synchronize()
+                        if torch.cuda.is_available():
+                            torch.cuda.synchronize()
                         
-                except Exception as e:
-                    logger.error(f"Error saving image {i}: {e}")
-                    continue
+                    except Exception as e:
+                        logger.error(f"Error saving image {i}: {e}")
+                        continue
             
 
             del output, images
