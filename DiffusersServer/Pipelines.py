@@ -30,16 +30,6 @@ class TextToImagePipelineSD3:
     def start(self):
         torch.set_float32_matmul_precision("high")
         
-        if hasattr(torch._inductor, 'config'):
-            if hasattr(torch._inductor.config, 'conv_1x1_as_mm'):
-                torch._inductor.config.conv_1x1_as_mm = True
-            if hasattr(torch._inductor.config, 'coordinate_descent_tuning'):
-                torch._inductor.config.coordinate_descent_tuning = True
-            if hasattr(torch._inductor.config, 'epilogue_fusion'):
-                torch._inductor.config.epilogue_fusion = False
-            if hasattr(torch._inductor.config, 'coordinate_descent_check_all_directions'):
-                torch._inductor.config.coordinate_descent_check_all_directions = True
-        
         if torch.cuda.is_available():
             torch.backends.cudnn.benchmark = True
             torch.backends.cuda.matmul.allow_tf32 = True
@@ -52,6 +42,8 @@ class TextToImagePipelineSD3:
             self.device = "cuda"
             
             torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+            torch.cuda.ipc_collect()
             gc.collect()
             
             self.pipeline = StableDiffusion3Pipeline.from_pretrained(
@@ -64,37 +56,6 @@ class TextToImagePipelineSD3:
             
             self.pipeline = self.pipeline.to(device=self.device)
             
-            #if hasattr(self.pipeline, 'enable_vae_slicing'):
-            #    self.pipeline.enable_vae_slicing()
-            #    logger.info("VAE slicing enabled - will reduce memory spikes during decoding")
-            
-            #if hasattr(self.pipeline, 'enable_vae_tiling'):
-            #    self.pipeline.enable_vae_tiling()
-            #    logger.info("VAE tiling enabled - will allow processing larger images")
-            
-            #if hasattr(self.pipeline, 'transformer') and self.pipeline.transformer is not None:
-            #    self.pipeline.transformer = self.pipeline.transformer.to(
-            #        memory_format=torch.channels_last
-            #    )
-            #    logger.info("Transformer optimized with channels_last format")
-            
-            #if hasattr(self.pipeline, 'vae') and self.pipeline.vae is not None:
-            #    self.pipeline.vae = self.pipeline.vae.to(
-            #        memory_format=torch.channels_last
-            #    )
-                
-            #    if hasattr(self.pipeline.vae, 'enable_slicing'):
-            #        self.pipeline.vae.enable_slicing()
-            #        logger.info("VAE slicing activated directly in the VAE")
-                
-            #    if hasattr(self.pipeline.vae, 'enable_tiling'):
-            #        self.pipeline.vae.enable_tiling()
-            #        logger.info("VAE tiling activated directly on the VAE")
-
-            #    if hasattr(self.pipeline.vae, 'set_use_memory_efficient_attention'):
-            #        self.pipeline.vae.set_use_memory_efficient_attention(True)
-                
-            #    logger.info("VAE optimized with channels_last format")
             
             try:
                 self.pipeline.enable_xformers_memory_efficient_attention()
@@ -102,10 +63,12 @@ class TextToImagePipelineSD3:
             except Exception as e:
                 logger.info(f"XFormers not available: {e}")
             
-            logger.info("Skipping torch.compile - running without compile optimizations by design")
+            logger.info("Skipping torch.compile to avoid memory leaks")
             
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
+                torch.cuda.ipc_collect()
             
             logger.info("CUDA pipeline fully optimized and ready")
             
@@ -121,19 +84,6 @@ class TextToImagePipelineSD3:
                 low_cpu_mem_usage=True,
             ).to(device=self.device)
             
-            #if hasattr(self.pipeline, 'enable_vae_slicing'):
-            #    self.pipeline.enable_vae_slicing()
-            #    logger.info("VAE slicing enabled in MPS")
-            
-            #if hasattr(self.pipeline, 'transformer') and self.pipeline.transformer is not None:
-            #    self.pipeline.transformer = self.pipeline.transformer.to(
-            #        memory_format=torch.channels_last
-            #    )
-            
-            #if hasattr(self.pipeline, 'vae') and self.pipeline.vae is not None:
-            #    self.pipeline.vae = self.pipeline.vae.to(
-            #        memory_format=torch.channels_last
-            #    )
                 
             logger.info("MPS pipeline optimized and ready")
             
@@ -160,6 +110,8 @@ class TextToImagePipelineSD3:
             if self.device == "cuda":
                 torch.cuda.synchronize()
                 torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
+                torch.cuda.ipc_collect()
             
             gc.collect()
             logger.info("Warmup completed with memory cleanup")
@@ -349,6 +301,7 @@ class VAELock:
                 torch.cuda.synchronize()
                 
                 torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
                 
                 if self.enable_memory_tracking:
                     if mem_before['reserved_gb'] - mem_before['allocated_gb'] > 1.0:
@@ -433,4 +386,5 @@ class VAELock:
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                     torch.cuda.empty_cache()
+                    torch.cuda.ipc_collect()
                 gc.collect()

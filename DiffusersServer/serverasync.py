@@ -83,6 +83,8 @@ class Utils:
 
         from concurrent.futures import ThreadPoolExecutor
         self.executor = ThreadPoolExecutor(max_workers=2)
+        import threading
+        self._save_semaphore = threading.Semaphore(4)
 
     def _save_pil_image(self, pil_image: Image.Image, filepath: str):
         try:
@@ -96,40 +98,19 @@ class Utils:
                 del pil_image
     
     def _tensor_to_pil_optimized(self, tensor: torch.Tensor) -> Image.Image:
-
         with torch.no_grad():
-            tensor_cpu = tensor.detach().clone()
-            
+            tensor_cpu = tensor.detach()
             if tensor_cpu.is_cuda:
                 tensor_cpu = tensor_cpu.cpu()
-                torch.cuda.synchronize()
-            
             if tensor_cpu.dim() == 4:
                 tensor_cpu = tensor_cpu[0]
-            
-            tensor_cpu = tensor_cpu.clamp(0, 1).mul(255).byte()
-            
-            if tensor_cpu.shape[0] in [1, 3, 4]:  
-                tensor_cpu = tensor_cpu.permute(1, 2, 0)
-            
-            np_array = tensor_cpu.contiguous().numpy()
-
+            tensor_cpu = tensor_cpu.clamp(0, 1).mul(255).to(torch.uint8)
+            if tensor_cpu.shape[0] in (1,3,4):
+                tensor_cpu = tensor_cpu.permute(1,2,0).contiguous()
+            np_array = tensor_cpu.numpy()
             del tensor_cpu
-            
-            if np_array.shape[-1] == 1:
-                np_array = np_array.squeeze(-1)
-                mode = 'L'
-            elif np_array.shape[-1] == 3:
-                mode = 'RGB'
-            elif np_array.shape[-1] == 4:
-                mode = 'RGBA'
-            else:
-                raise ValueError(f"Unsupported number of channels: {np_array.shape[-1]}")
-            
-            pil_image = Image.fromarray(np_array, mode=mode)
-            
+            pil_image = Image.fromarray(np_array)
             del np_array
-            
             return pil_image
     
     async def save_image(self, image) -> str:
@@ -140,33 +121,29 @@ class Utils:
         url = os.path.join(self.service_url, "images", filename)
         
         loop = asyncio.get_event_loop()
-        
         try:
             if isinstance(image, Image.Image):
                 await loop.run_in_executor(
                     self.executor,
+                    lambda img=image, fp=filepath: (self._save_pil_image(img, fp), None)[1]
+                )
+            elif isinstance(image, torch.Tensor):
+                pil_image = await loop.run_in_executor(
+                    self.executor,
+                    self._tensor_to_pil_optimized,
+                    image
+                )
+                await loop.run_in_executor(
+                    self.executor,
                     self._save_pil_image,
-                    image,
+                    pil_image,
                     filepath
                 )
-                
-            elif isinstance(image, torch.Tensor):
-                with torch.no_grad():
-                    pil_image = await loop.run_in_executor(
-                        None,
-                        self._tensor_to_pil_optimized,
-                        image
-                    )
-                    
-                    await loop.run_in_executor(
-                        self.executor,
-                        self._save_pil_image,
-                        pil_image,
-                        filepath
-                    )
-                    
+                try:
+                    pil_image.close()
                     del pil_image
-                
+                except Exception:
+                    pass
             else:
                 raise ValueError(f"Unsupported image type: {type(image)}")
             
@@ -203,6 +180,8 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
     async def lifespan(app: FastAPI):
         logging.basicConfig(level=logging.INFO)
         app.state.logger = logging.getLogger("diffusers-server")
+        os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128,expandable_segments:True'
+        os.environ['CUDA_LAUNCH_BLOCKING'] = '0'
 
         app.state.total_requests = 0
         app.state.active_inferences = 0
@@ -340,7 +319,8 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
                     generator=gen,
                     num_inference_steps=num_steps,
                     num_images_per_prompt=num_images_per_prompt,
-                    device=initializer.device
+                    device=initializer.device,
+                    output_type="pil"
                 )
             
             return output
@@ -368,17 +348,27 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
                     
                         if torch.cuda.is_available():
                             torch.cuda.synchronize()
+                            torch.cuda.reset_peak_memory_stats()
+                            torch.cuda.ipc_collect()
                         
                     except Exception as e:
                         logger.error(f"Error saving image {i}: {e}")
                         continue
-            
 
-            del output, images
+                del images
+
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+
+            del output
             
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
                 torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
+                torch.cuda.ipc_collect()
             
             gc.collect()
             
@@ -397,6 +387,8 @@ def create_app_fastapi(config: ServerConfigModels) -> FastAPI:
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
                 torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
+                torch.cuda.ipc_collect()
             gc.collect()
 
 
