@@ -12,22 +12,34 @@
   <i><a href="README_es.md">También disponible en Español</a> | <a href="README.md">Also available in Spanish</a></i>
 </p>
 
----
+## ⚠️ **Important Migration Notice**
+
+### 🎉 **We've Evolved!** 
+
+DiffusersServer has graduated into something **bigger and better**:
+
+## 🌟 **[Aquiles-Image](https://github.com/Aquiles-ai/Aquiles-Image)** 🌟
+
+### 🔥 **What's New in Aquiles-Image:**
+- ⚡ **3x Faster** inference with advanced optimizations
+- 🎨 **More Models** - Support for FLUX, SD3-3.5, Qwen-Image and more.  
+- 🔧 **Better DevX** - Improved CLI and monitoring
+- 🔌 **OpenAI Compatible** - Drop-in replacement for OpenAI's image APIs
+
+#### 🎯 Perfect For
+  - **AI Startups** building image generation features
+  - **Developers** prototyping with Stable Diffusion
+  - **Enterprises** needing scalable image AI infrastructure
+  - **Researchers** experimenting with multiple models
+
 
 ## 🌟 What is DiffusersServer?
 
-**DiffusersServer** is an inference server based on Flask and Waitress that allows generating images from text (*Text-to-Image*) using advanced diffusion models.
+**DiffusersServer** is an inference server based on FastAPI and Uvicorn that allows generating images from text (*Text-to-Image*) using advanced diffusion models.
 
-Compatible with **Stable Diffusion 3**, **Stable Diffusion 3.5**, **Flux**, and **Stable Diffusion v1.5**, it provides an efficient REST API to integrate image generation into your applications.
+Compatible with **Stable Diffusion 3**, **Stable Diffusion 3.5** it provides an efficient REST API to integrate image generation into your applications.
 
 ## ⚡ Main features
-
-✅ **Support for multiple models**
-
-- Stable Diffusion 3 *(Medium)*
-- Stable Diffusion 3.5 *(Large, Large-Turbo, Medium)*
-- Flux *(Flux 1 Schnell, Flux 1 Dev)*
-- Stable Diffusion v1.5
 
 ✅ **GPU and MPS compatibility**
 
@@ -36,21 +48,14 @@ Compatible with **Stable Diffusion 3**, **Stable Diffusion 3.5**, **Flux**, and 
 
 ✅ **Efficient and scalable server**
 
-- Implementation with Flask + Waitress
+- Implementation with FastAPI + Uvicorn
 - Support for multiple threads
 - Loads models in memory only once
 
 ✅ **Easy-to-use REST API**
 
 - Inference endpoint: `POST /api/diffusers/inference`
-- Customizable parameters: prompt, model, image size, number of images
 
-✅ **Optimized memory management**
-
-- *CPU offloading* in Flux models to reduce VRAM usage
-- Optional memory consumption monitoring
-
----
 
 ## 🚀 DiffusersServer is designed to offer a lightweight, fast, and flexible solution for text-to-image generation.
 
