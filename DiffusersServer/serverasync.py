@@ -5,7 +5,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from .Pipelines import TextToImagePipelineSD3, TextToImagePipelineFlux, TextToImagePipelineSD
 import logging
-from diffusers.pipelines.pipeline_utils import RequestScopedPipeline
+from .utils import RequestScopedPipeline
 from diffusers import *
 from .superpipeline import *
 import random
